@@ -241,7 +241,8 @@ mod app {
                 left_indicator_btn.pin_id()
             );
             left_indicator_btn.clear_interrupt_pending_bit();
-            button_indicator_left_handler::spawn().unwrap();
+            button_indicator_left_handler::spawn(left_indicator_btn.is_high())
+                .unwrap();
         }
 
         if right_indicator_btn.check_interrupt() {
@@ -250,19 +251,24 @@ mod app {
                 right_indicator_btn.pin_id()
             );
             right_indicator_btn.clear_interrupt_pending_bit();
-            button_indicator_right_handler::spawn().unwrap();
+            button_indicator_right_handler::spawn(
+                right_indicator_btn.is_high(),
+            )
+            .unwrap();
         }
 
         if horn_btn.check_interrupt() {
             defmt::trace!("Interrupt triggered on {:?}", horn_btn.pin_id());
             horn_btn.clear_interrupt_pending_bit();
-            button_horn_handler::spawn().unwrap();
+            button_horn_handler::spawn(horn_btn.is_high()).unwrap();
         }
     }
 
+    /// Handle left indictor button state change
     #[task(priority = 2, shared = [can])]
     fn button_indicator_left_handler(
         mut cx: button_indicator_left_handler::Context,
+        state: bool,
     ) {
         defmt::trace!("task: can send left indicator frame");
         let light_frame = com::lighting::message(
@@ -275,9 +281,11 @@ mod app {
         });
     }
 
+    /// Handle left indicator button state change
     #[task(priority = 2, shared = [can])]
     fn button_indicator_right_handler(
         mut cx: button_indicator_right_handler::Context,
+        state: bool,
     ) {
         defmt::trace!("task: can send right indicator frame");
         let light_frame = com::lighting::message(
@@ -290,8 +298,9 @@ mod app {
         });
     }
 
+    /// Handle horn button state change
     #[task(priority = 2, shared = [can])]
-    fn button_horn_handler(mut cx: button_horn_handler::Context) {
+    fn button_horn_handler(mut cx: button_horn_handler::Context, state: bool) {
         cx.shared.can.lock(|can| {});
     }
 
