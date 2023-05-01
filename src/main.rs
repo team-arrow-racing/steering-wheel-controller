@@ -234,7 +234,7 @@ mod app {
         exti9_5_receive::spawn().unwrap();
     }
 
-    #[task(priority = 2, local=[left_indicator_btn, right_indicator_btn, horn_btn], shared = [can])]
+    #[task(priority = 2, local=[left_indicator_btn, right_indicator_btn, horn_btn])]
     fn exti9_5_receive(cx: exti9_5_receive::Context) {
         defmt::trace!("task: exti9_5 receive");
 
