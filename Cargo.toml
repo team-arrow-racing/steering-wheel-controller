@@ -21,8 +21,8 @@ dwt-systick-monotonic = { version = "1.1.0", features = ["extend"] }
 
 [dependencies.solar-car]
 version = "0.1.1"
-git = "https://gitlab.com/team-arrow-racing/arrow-3/solar-car"
-# path = "../solar-car" # for local development
+# git = "https://github.com/team-arrow-racing/solar-car-common"
+path = "../solar-car-common" # for local development
 
 [[bin]]
 name = "steering-wheel"
