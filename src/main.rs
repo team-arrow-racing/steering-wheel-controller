@@ -201,6 +201,7 @@ mod app {
         };
 
         run::spawn().unwrap();
+        heartbeat::spawn().unwrap();
 
         (
             Shared { can },
@@ -224,6 +225,22 @@ mod app {
         cx.local.watchdog.feed();
 
         run::spawn_after(Duration::millis(10)).unwrap();
+    }
+
+    #[task(local = [led_status], shared = [can])]
+    fn heartbeat(mut cx: heartbeat::Context) {
+        defmt::trace!("task: heartbeat");
+
+        cx.local.led_status.toggle();
+
+        if cx.local.led_status.is_set_low() {
+            cx.shared.can.lock(|can| {
+                let _ = can.transmit(&com::heartbeat::message(DEVICE));
+            });
+        }
+
+        // repeat every second
+        heartbeat::spawn_after(500.millis().into()).unwrap();
     }
 
     /// Triggers on interrupt event.
