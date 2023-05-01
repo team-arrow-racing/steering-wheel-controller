@@ -227,16 +227,9 @@ mod app {
     }
 
     /// Triggers on interrupt event.
-    #[task(priority = 1, binds = EXTI9_5)]
-    fn exti9_5_pending(_: exti9_5_pending::Context) {
+    #[task(priority = 1, binds = EXTI9_5, local = [left_indicator_btn, right_indicator_btn, horn_btn])]
+    fn exti9_5_pending(cx: exti9_5_pending::Context) {
         defmt::trace!("task: exti9_5 pending");
-
-        exti9_5_receive::spawn().unwrap();
-    }
-
-    #[task(priority = 2, local=[left_indicator_btn, right_indicator_btn, horn_btn])]
-    fn exti9_5_receive(cx: exti9_5_receive::Context) {
-        defmt::trace!("task: exti9_5 receive");
 
         let left_indicator_btn = cx.local.left_indicator_btn;
         let right_indicator_btn = cx.local.right_indicator_btn;
