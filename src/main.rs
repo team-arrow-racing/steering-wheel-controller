@@ -27,7 +27,7 @@ use stm32l4xx_hal::{
     device::CAN1,
     flash::FlashExt,
     gpio::{
-        Alternate, Edge, ExtiPin, Input, Output, PinExt, PullUp, PushPull,
+        Alternate, Edge, ExtiPin, Input, Output, PullUp, PushPull,
         PA11, PA12, PA14, PA8, PB13, PB5,
     },
     prelude::*,
@@ -65,10 +65,10 @@ mod app {
     #[local]
     struct Local {
         watchdog: IndependentWatchdog,
-        status_led: PB13<Output<PushPull>>,
-        left_indicator_btn: PA8<Input<PullUp>>,
-        right_indicator_btn: PB5<Input<PullUp>>, // TODO figure out which pins
-        horn_btn: PA14<Input<PullUp>>,
+        led_status: PB13<Output<PushPull>>,
+        btn_indicator_left: PA8<Input<PullUp>>,
+        btn_indicator_right: PB5<Input<PullUp>>, // TODO figure out which pins
+        btn_horn: PA14<Input<PullUp>>,
     }
 
     #[init]
@@ -99,13 +99,13 @@ mod app {
         );
 
         // configure status led
-        let status_led = gpiob
+        let led_status = gpiob
             .pb13
             .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
 
         // TODO: 8 buttons in total
         // figure out a way to have all these in an array or map {button: pin}
-        let left_indicator_btn = {
+        let btn_indicator_left = {
             let mut btn = gpioa
                 .pa8
                 .into_pull_up_input(&mut gpioa.moder, &mut gpioa.pupdr);
@@ -121,7 +121,7 @@ mod app {
             btn
         };
 
-        let right_indicator_btn = {
+        let btn_indicator_right = {
             let mut btn = gpiob
                 .pb5
                 .into_pull_up_input(&mut gpiob.moder, &mut gpiob.pupdr);
@@ -137,7 +137,7 @@ mod app {
             btn
         };
 
-        let horn_btn = {
+        let btn_horn = {
             let mut btn = gpioa
                 .pa14
                 .into_pull_up_input(&mut gpioa.moder, &mut gpioa.pupdr);
@@ -206,10 +206,10 @@ mod app {
             Shared { can },
             Local {
                 watchdog,
-                status_led,
-                left_indicator_btn,
-                right_indicator_btn,
-                horn_btn,
+                led_status,
+                btn_indicator_left,
+                btn_indicator_right,
+                btn_horn,
             },
             init::Monotonics(mono),
         )
@@ -227,13 +227,13 @@ mod app {
     }
 
     /// Triggers on interrupt event.
-    #[task(priority = 1, binds = EXTI9_5, local = [left_indicator_btn, right_indicator_btn, horn_btn])]
+    #[task(priority = 1, binds = EXTI9_5, local = [btn_indicator_left, btn_indicator_right, btn_horn])]
     fn exti9_5_pending(cx: exti9_5_pending::Context) {
         defmt::trace!("task: exti9_5 pending");
 
-        let left_indicator_btn = cx.local.left_indicator_btn;
-        let right_indicator_btn = cx.local.right_indicator_btn;
-        let horn_btn = cx.local.horn_btn;
+        let left_indicator_btn = cx.local.btn_indicator_left;
+        let right_indicator_btn = cx.local.btn_indicator_right;
+        let horn_btn = cx.local.btn_horn;
 
         if left_indicator_btn.check_interrupt() {
             left_indicator_btn.clear_interrupt_pending_bit();
