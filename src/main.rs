@@ -24,17 +24,18 @@ use solar_car::{com, device};
 
 use stm32l4xx_hal::{
     can::Can,
-    device::{CAN1},
+    device::CAN1,
     flash::FlashExt,
-    gpio::{Alternate, Edge, ExtiPin, Input, Output, PinExt, PullUp, PushPull, PA8, PA11, PA12, PA14, PB5, PB13,},
+    gpio::{
+        Alternate, Edge, ExtiPin, Input, Output, PinExt, PullUp, PushPull,
+        PA11, PA12, PA14, PA8, PB13, PB5,
+    },
     prelude::*,
-    watchdog::IndependentWatchdog,
     stm32,
+    watchdog::IndependentWatchdog,
 };
 
-use cortex_m::{
-    peripheral::NVIC,
-};
+use cortex_m::peripheral::NVIC;
 
 const DEVICE: device::Device = device::Device::SteeringWheel;
 const SYSCLK: u32 = 80_000_000;
@@ -53,7 +54,12 @@ mod app {
 
     #[shared]
     struct Shared {
-        can: bxcan::Can<Can<CAN1, (PA12<Alternate<PushPull, 9>>, PA11<Alternate<PushPull, 9>>)>>,
+        can: bxcan::Can<
+            Can<
+                CAN1,
+                (PA12<Alternate<PushPull, 9>>, PA11<Alternate<PushPull, 9>>),
+            >,
+        >,
     }
 
     #[local]
@@ -62,7 +68,7 @@ mod app {
         status_led: PB13<Output<PushPull>>,
         left_indicator_btn: PA8<Input<PullUp>>,
         right_indicator_btn: PB5<Input<PullUp>>, // TODO figure out which pins
-        horn_btn: PA14<Input<PullUp>>
+        horn_btn: PA14<Input<PullUp>>,
     }
 
     #[init]
@@ -78,11 +84,11 @@ mod app {
 
         // configure system clock
         let clocks = rcc
-                .cfgr
-                .sysclk(80.MHz())
-                .pclk1(80.MHz())
-                .pclk2(80.MHz())
-                .freeze(&mut flash.acr, &mut pwr);
+            .cfgr
+            .sysclk(80.MHz())
+            .pclk1(80.MHz())
+            .pclk2(80.MHz())
+            .freeze(&mut flash.acr, &mut pwr);
 
         // configure monotonic time
         let mono = DwtSystick::new(
@@ -111,7 +117,7 @@ mod app {
             unsafe {
                 NVIC::unmask(stm32::Interrupt::EXTI9_5);
             }
-    
+
             btn
         };
 
@@ -127,7 +133,7 @@ mod app {
             unsafe {
                 NVIC::unmask(stm32::Interrupt::EXTI9_5);
             }
-    
+
             btn
         };
 
@@ -143,23 +149,29 @@ mod app {
             unsafe {
                 NVIC::unmask(stm32::Interrupt::EXTI9_5);
             }
-        
+
             btn
         };
 
         // configure can bus
         let can = {
-            let rx =
-                gpioa
-                    .pa11
-                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh);
-            let tx =
-                gpioa
-                    .pa12
-                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh);
+            let rx = gpioa.pa11.into_alternate(
+                &mut gpioa.moder,
+                &mut gpioa.otyper,
+                &mut gpioa.afrh,
+            );
+            let tx = gpioa.pa12.into_alternate(
+                &mut gpioa.moder,
+                &mut gpioa.otyper,
+                &mut gpioa.afrh,
+            );
 
-            let can = bxcan::Can::builder(Can::new(&mut rcc.apb1r1, cx.device.CAN1, (tx, rx)))
-                .set_bit_timing(0x001c_0009); // 500kbit/s
+            let can = bxcan::Can::builder(Can::new(
+                &mut rcc.apb1r1,
+                cx.device.CAN1,
+                (tx, rx),
+            ))
+            .set_bit_timing(0x001c_0009); // 500kbit/s
 
             let mut can = can.enable();
 
@@ -197,7 +209,7 @@ mod app {
                 status_led,
                 left_indicator_btn,
                 right_indicator_btn,
-                horn_btn
+                horn_btn,
             },
             init::Monotonics(mono),
         )
@@ -229,15 +241,21 @@ mod app {
         let left_indicator_btn = cx.local.left_indicator_btn;
         let right_indicator_btn = cx.local.right_indicator_btn;
         let horn_btn = cx.local.horn_btn;
-        
+
         if left_indicator_btn.check_interrupt() {
-            defmt::trace!("Interrupt triggered on {:?}", left_indicator_btn.pin_id());
+            defmt::trace!(
+                "Interrupt triggered on {:?}",
+                left_indicator_btn.pin_id()
+            );
             left_indicator_btn.clear_interrupt_pending_bit();
             handle_left_indicator_light::spawn().unwrap();
         }
 
         if right_indicator_btn.check_interrupt() {
-            defmt::trace!("Interrupt triggered on {:?}", right_indicator_btn.pin_id());
+            defmt::trace!(
+                "Interrupt triggered on {:?}",
+                right_indicator_btn.pin_id()
+            );
             right_indicator_btn.clear_interrupt_pending_bit();
             handle_right_indicator_light::spawn().unwrap();
         }
@@ -250,9 +268,14 @@ mod app {
     }
 
     #[task(priority = 2, shared = [can])]
-    fn handle_left_indicator_light(mut cx: handle_left_indicator_light::Context) {
+    fn handle_left_indicator_light(
+        mut cx: handle_left_indicator_light::Context,
+    ) {
         defmt::trace!("task: can send left indicator frame");
-        let light_frame = com::lighting::message(DEVICE, com::lighting::LampsState::INDICATOR_LEFT.bits());
+        let light_frame = com::lighting::message(
+            DEVICE,
+            com::lighting::LampsState::INDICATOR_LEFT.bits(),
+        );
 
         cx.shared.can.lock(|can| {
             let _ = can.transmit(&light_frame);
@@ -260,9 +283,14 @@ mod app {
     }
 
     #[task(priority = 2, shared = [can])]
-    fn handle_right_indicator_light(mut cx: handle_right_indicator_light::Context) {
+    fn handle_right_indicator_light(
+        mut cx: handle_right_indicator_light::Context,
+    ) {
         defmt::trace!("task: can send right indicator frame");
-        let light_frame = com::lighting::message(DEVICE, com::lighting::LampsState::INDICATOR_RIGHT.bits());
+        let light_frame = com::lighting::message(
+            DEVICE,
+            com::lighting::LampsState::INDICATOR_RIGHT.bits(),
+        );
 
         cx.shared.can.lock(|can| {
             let _ = can.transmit(&light_frame);
@@ -271,9 +299,7 @@ mod app {
 
     #[task(priority = 2, shared = [can])]
     fn handle_horn(mut cx: handle_horn::Context) {
-        cx.shared.can.lock(|can| {
-
-        });
+        cx.shared.can.lock(|can| {});
     }
 
     #[idle]
