@@ -255,7 +255,7 @@ mod app {
         let light_frame = com::lighting::message(DEVICE, com::lighting::LampsState::INDICATOR_LEFT.bits());
 
         cx.shared.can.lock(|can| {
-            can.transmit(&light_frame);
+            let _ = can.transmit(&light_frame);
         });
     }
 
@@ -265,7 +265,7 @@ mod app {
         let light_frame = com::lighting::message(DEVICE, com::lighting::LampsState::INDICATOR_RIGHT.bits());
 
         cx.shared.can.lock(|can| {
-            can.transmit(&light_frame);
+            let _ = can.transmit(&light_frame);
         });
     }
 
