@@ -236,20 +236,12 @@ mod app {
         let horn_btn = cx.local.horn_btn;
 
         if left_indicator_btn.check_interrupt() {
-            defmt::trace!(
-                "Interrupt triggered on {:?}",
-                left_indicator_btn.pin_id()
-            );
             left_indicator_btn.clear_interrupt_pending_bit();
             button_indicator_left_handler::spawn(left_indicator_btn.is_high())
                 .unwrap();
         }
 
         if right_indicator_btn.check_interrupt() {
-            defmt::trace!(
-                "Interrupt triggered on {:?}",
-                right_indicator_btn.pin_id()
-            );
             right_indicator_btn.clear_interrupt_pending_bit();
             button_indicator_right_handler::spawn(
                 right_indicator_btn.is_high(),
@@ -258,7 +250,6 @@ mod app {
         }
 
         if horn_btn.check_interrupt() {
-            defmt::trace!("Interrupt triggered on {:?}", horn_btn.pin_id());
             horn_btn.clear_interrupt_pending_bit();
             button_horn_handler::spawn(horn_btn.is_high()).unwrap();
         }
