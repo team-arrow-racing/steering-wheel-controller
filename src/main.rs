@@ -241,7 +241,7 @@ mod app {
                 left_indicator_btn.pin_id()
             );
             left_indicator_btn.clear_interrupt_pending_bit();
-            handle_left_indicator_light::spawn().unwrap();
+            button_indicator_left_handler::spawn().unwrap();
         }
 
         if right_indicator_btn.check_interrupt() {
@@ -250,19 +250,19 @@ mod app {
                 right_indicator_btn.pin_id()
             );
             right_indicator_btn.clear_interrupt_pending_bit();
-            handle_right_indicator_light::spawn().unwrap();
+            button_indicator_right_handler::spawn().unwrap();
         }
 
         if horn_btn.check_interrupt() {
             defmt::trace!("Interrupt triggered on {:?}", horn_btn.pin_id());
             horn_btn.clear_interrupt_pending_bit();
-            handle_horn::spawn().unwrap();
+            button_horn_handler::spawn().unwrap();
         }
     }
 
     #[task(priority = 2, shared = [can])]
-    fn handle_left_indicator_light(
-        mut cx: handle_left_indicator_light::Context,
+    fn button_indicator_left_handler(
+        mut cx: button_indicator_left_handler::Context,
     ) {
         defmt::trace!("task: can send left indicator frame");
         let light_frame = com::lighting::message(
@@ -276,8 +276,8 @@ mod app {
     }
 
     #[task(priority = 2, shared = [can])]
-    fn handle_right_indicator_light(
-        mut cx: handle_right_indicator_light::Context,
+    fn button_indicator_right_handler(
+        mut cx: button_indicator_right_handler::Context,
     ) {
         defmt::trace!("task: can send right indicator frame");
         let light_frame = com::lighting::message(
@@ -291,7 +291,7 @@ mod app {
     }
 
     #[task(priority = 2, shared = [can])]
-    fn handle_horn(mut cx: handle_horn::Context) {
+    fn button_horn_handler(mut cx: button_horn_handler::Context) {
         cx.shared.can.lock(|can| {});
     }
 
