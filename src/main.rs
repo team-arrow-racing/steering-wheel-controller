@@ -206,7 +206,7 @@ mod app {
     // TODO each task needs rising or falling edge as parameter
 
     #[task(priority = 1, local = [watchdog])]
-    fn run(mut cx: run::Context) {
+    fn run(cx: run::Context) {
         defmt::trace!("task: run");
 
         cx.local.watchdog.feed();
@@ -223,7 +223,7 @@ mod app {
     }
 
     #[task(priority = 2, local=[left_indicator_btn, right_indicator_btn, horn_btn], shared = [can])]
-    fn exti9_5_receive(mut cx: exti9_5_receive::Context) {
+    fn exti9_5_receive(cx: exti9_5_receive::Context) {
         defmt::trace!("task: exti9_5 receive");
 
         let left_indicator_btn = cx.local.left_indicator_btn;
