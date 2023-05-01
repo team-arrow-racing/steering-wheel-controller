@@ -302,7 +302,7 @@ dependencies = [
 [[package]]
 name = "j1939"
 version = "0.1.1"
-source = "git+https://gitlab.com/team-arrow-racing/sae-j1939#e1e5acc9e292af12cd2340707130a815dead47cf"
+source = "git+https://github.com/team-arrow-racing/sae-j1939-rs#e1e5acc9e292af12cd2340707130a815dead47cf"
 dependencies = [
  "bxcan",
 ]
