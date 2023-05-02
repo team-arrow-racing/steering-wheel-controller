@@ -241,6 +241,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-sdmmc"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b4ae38d27afe8ffb1c31f82ebe4960f099ac55bbdc35e813a45cade676f2600"
+dependencies = [
+ "byteorder",
+ "embedded-hal",
+ "log",
+]
+
+[[package]]
 name = "fugit"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -302,7 +313,7 @@ dependencies = [
 [[package]]
 name = "j1939"
 version = "0.1.1"
-source = "git+https://gitlab.com/team-arrow-racing/sae-j1939#e1e5acc9e292af12cd2340707130a815dead47cf"
+source = "git+https://github.com/team-arrow-racing/sae-j1939-rs#2bde0d0e63c55e79918fa39a9cec64a749bc3f82"
 dependencies = [
  "bxcan",
 ]
@@ -315,6 +326,15 @@ checksum = "435011366fe56583b16cf956f9df0095b405b82d76425bc8981c0e22e60ec4df"
 dependencies = [
  "autocfg",
  "scopeguard",
+]
+
+[[package]]
+name = "log"
+version = "0.4.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "abb12e687cfb44aa40f41fc3978ef76448f9b6038cad6aef4259d3c095a2382e"
+dependencies = [
+ "cfg-if",
 ]
 
 [[package]]
@@ -489,15 +509,13 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 [[package]]
 name = "solar-car"
 version = "0.1.1"
-source = "git+https://gitlab.com/team-arrow-racing/arrow-3/solar-car#2005adb0c475498bcbe9979138a0a9ad2052dd60"
+source = "git+https://github.com/team-arrow-racing/solar-car-common#dec3653b445162589620b0d5b518a341d41dad18"
 dependencies = [
  "bitflags",
  "bxcan",
  "defmt",
- "heapless",
  "j1939",
  "packed_struct",
- "stm32l4xx-hal",
 ]
 
 [[package]]
@@ -529,6 +547,7 @@ dependencies = [
  "dwt-systick-monotonic",
  "elmar-mppt",
  "embedded-hal",
+ "embedded-sdmmc",
  "heapless",
  "nb 1.1.0",
  "panic-probe",
