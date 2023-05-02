@@ -21,23 +21,65 @@ use panic_probe as _;
 
 use dwt_systick_monotonic::{fugit, DwtSystick};
 use solar_car::{com, device};
+use embedded_hal::{
+    spi::{Mode, Phase, Polarity}
+};
 
 use stm32l4xx_hal::{
     can::Can,
-    device::{CAN1},
+    device::{CAN1,SPI1},
     flash::FlashExt,
-    gpio::{Alternate, Edge, ExtiPin, Input, Output, PinExt, PullUp, PushPull, PA8, PA11, PA12, PA14, PB5, PB13,},
+    gpio::{Alternate, Edge, ExtiPin, Input, OpenDrain, Output, PinExt, PullUp, PushPull, PA4, PA5, PA6, PA7, PA8, PA10, PA11, PA12, PA13, PA14, PB5, PB11, PB13,},
     prelude::*,
     watchdog::IndependentWatchdog,
     stm32,
+    spi::Spi,
 };
 
 use cortex_m::{
     peripheral::NVIC,
 };
 
+use core::marker::PhantomData;
+
+const FILE_TO_CREATE: &'static str = "CREATE.TXT";
+
+use embedded_sdmmc::{
+    BlockSpi, Controller, Directory, SdMmcSpi, TimeSource, Timestamp, Volume
+};
+
+
 const DEVICE: device::Device = device::Device::SteeringWheel;
 const SYSCLK: u32 = 80_000_000;
+
+/// SPI mode
+pub const MODE: Mode = Mode {
+    phase: Phase::CaptureOnFirstTransition,
+    polarity: Polarity::IdleLow,
+};
+
+struct TimeSink {
+    _marker: PhantomData<*const ()>,
+}
+
+impl TimeSink {
+    fn new() -> Self {
+        TimeSink { _marker: PhantomData}
+    }
+}
+
+impl TimeSource for TimeSink {
+    fn get_timestamp(&self) -> Timestamp {
+        Timestamp{
+            year_since_1970: 0,
+            zero_indexed_month: 0,
+            zero_indexed_day: 0,
+            hours: 0,
+            minutes: 0,
+            seconds: 0,
+        }
+    }
+}
 
 #[rtic::app(device = stm32l4xx_hal::pac, dispatchers = [SPI1, SPI2, SPI3, QUADSPI])]
 mod app {
@@ -62,7 +104,10 @@ mod app {
         status_led: PB13<Output<PushPull>>,
         left_indicator_btn: PA8<Input<PullUp>>,
         right_indicator_btn: PB5<Input<PullUp>>, // TODO figure out which pins
-        horn_btn: PA14<Input<PullUp>>
+        horn_btn: PA14<Input<PullUp>>,
+        // sdmmc_controller : Controller<BlockSpi<Spi<SPI1, (PA5<Alternate<PushPull, 5>>, PA6<Alternate<PushPull, 5>>, PA7<Alternate<PushPull, 5>>)>, PA4<Output<OpenDrain>>>, TimeSink>,
+        volume: Volume,
+        root_dir: Directory
     }
 
     #[init]
@@ -147,6 +192,64 @@ mod app {
             btn
         };
 
+        let mut dc = gpiob
+            .pb1
+            .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
+
+        let sck = gpioa
+            .pa5
+            .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl);
+
+        let miso = gpioa
+            .pa6
+            .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl);
+
+        let mosi = gpioa
+            .pa7
+            .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl);
+
+        dc.set_low();
+
+        let mut spi = Spi::spi1(
+            cx.device.SPI1,
+            (sck, miso, mosi),
+            MODE,
+            100.kHz(),
+            clocks,
+            &mut rcc.apb2
+        );
+
+        let spi_cs_pin = gpioa
+            .pa4
+            .into_open_drain_output(&mut gpioa.moder, &mut gpioa.otyper);
+
+        let mut spi_dev = SdMmcSpi::new(spi, spi_cs_pin);
+            
+        let time_sink: TimeSink = TimeSink::new();
+
+        let mut sdmmc_controller = Controller::new(spi_dev.acquire().unwrap(), time_sink);
+
+        let mut volume = match sdmmc_controller.get_volume(embedded_sdmmc::VolumeIdx(0)) {
+            Ok(volume) => volume,
+            Err(e) => {
+                defmt::debug!("Error getting volume 0: {:?}!", e);
+                panic!("Error getting volume 0: {:?}!", e);
+            },
+        };
+
+        let root_dir = match sdmmc_controller.open_root_dir(&volume) {
+            Ok(root_dir) => root_dir,
+            Err(e) => {
+                defmt::debug!("Error getting root directory on volume 0: {:?}!", e);
+                panic!("Error getting root directory on volume 0: {:?}!", e);
+            },
+        };
+
+        match sdmmc_controller.device().card_size_bytes() {
+            Ok(size) => defmt::debug!( "Card size: {}", size),
+            Err(e) => defmt::debug!("Error reading card size: {:?}", e),
+        }
+
         // configure can bus
         let can = {
             let rx =
@@ -188,16 +291,22 @@ mod app {
             wd
         };
 
+        // sd_card_write::spawn().unwrap();
         run::spawn().unwrap();
 
         (
-            Shared { can },
+            Shared {
+                can                
+            },
             Local {
                 watchdog,
                 status_led,
                 left_indicator_btn,
                 right_indicator_btn,
-                horn_btn
+                horn_btn,
+                // sdmmc_controller,
+                volume,
+                root_dir
             },
             init::Monotonics(mono),
         )
@@ -213,6 +322,38 @@ mod app {
 
         run::spawn_after(Duration::millis(10)).unwrap();
     }
+
+    // #[task(priority = 1, local = [volume, root_dir, sdmmc_controller])]
+    // fn sd_card_write(mut cx: sd_card_write::Context) {
+    //     let volume = cx.local.volume;
+    //     let root_dir = cx.local.root_dir;
+    //     let sdmmc_controller = cx.local.sdmmc_controller;
+
+    //     let file = sdmmc_controller.open_file_in_dir(volume, &root_dir, FILE_TO_CREATE, embedded_sdmmc::Mode::ReadWriteCreateOrTruncate);
+    //     let mut file = match file {
+    //         Ok(file) => file,
+    //         Err(e) => {
+    //             defmt::debug!("Error creating file: {:?}!", e);
+    //             panic!("Error creating 'example.txt': {:?}!", e);
+    //         },
+    //     };
+
+    //     let bytes_written = match sdmmc_controller.write(volume, &mut file, b"testing file writes.") {
+    //         Ok(bytes_written) => bytes_written,
+    //         Err(e) => {
+    //             defmt::debug!("Error writing to 'example.txt': {:?}!", e);
+    //             panic!("Error writing to 'example.txt': {:?}!", e);
+    //         },
+    //     };
+    //     defmt::debug!("Bytes written: {}", bytes_written);
+    
+    //     sdmmc_controller.close_file(&volume, file);
+    //     sdmmc_controller.close_dir(&volume, *root_dir);
+    
+    //     defmt::debug!("File 'example.txt' has been written to the SD card!");
+
+        
+    // }
 
     /// Triggers on interrupt event.
     #[task(priority = 1, binds = EXTI9_5)]
