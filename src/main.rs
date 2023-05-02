@@ -31,14 +31,11 @@ use stm32l4xx_hal::{
     flash::FlashExt,
     gpio::{Alternate, Edge, ExtiPin, Input, OpenDrain, Output, PinExt, PullUp, PushPull, PA4, PA5, PA6, PA7, PA8, PA10, PA11, PA12, PA13, PA14, PB5, PB11, PB13,},
     prelude::*,
-    watchdog::IndependentWatchdog,
     stm32,
     spi::Spi,
 };
 
-use cortex_m::{
-    peripheral::NVIC,
-};
+use cortex_m::peripheral::NVIC;
 
 use core::marker::PhantomData;
 
@@ -95,16 +92,21 @@ mod app {
 
     #[shared]
     struct Shared {
-        can: bxcan::Can<Can<CAN1, (PA12<Alternate<PushPull, 9>>, PA11<Alternate<PushPull, 9>>)>>,
+        can: bxcan::Can<
+            Can<
+                CAN1,
+                (PA12<Alternate<PushPull, 9>>, PA11<Alternate<PushPull, 9>>),
+            >,
+        >,
     }
 
     #[local]
     struct Local {
         watchdog: IndependentWatchdog,
-        status_led: PB13<Output<PushPull>>,
-        left_indicator_btn: PA8<Input<PullUp>>,
-        right_indicator_btn: PB5<Input<PullUp>>, // TODO figure out which pins
-        horn_btn: PA14<Input<PullUp>>,
+        led_status: PB13<Output<PushPull>>,
+        btn_indicator_left: PA8<Input<PullUp>>,
+        btn_indicator_right: PB5<Input<PullUp>>, // TODO figure out which pins
+        btn_horn: PA14<Input<PullUp>>,
         // sdmmc_controller : Controller<BlockSpi<Spi<SPI1, (PA5<Alternate<PushPull, 5>>, PA6<Alternate<PushPull, 5>>, PA7<Alternate<PushPull, 5>>)>, PA4<Output<OpenDrain>>>, TimeSink>,
         volume: Volume,
         root_dir: Directory
@@ -123,11 +125,11 @@ mod app {
 
         // configure system clock
         let clocks = rcc
-                .cfgr
-                .sysclk(80.MHz())
-                .pclk1(80.MHz())
-                .pclk2(80.MHz())
-                .freeze(&mut flash.acr, &mut pwr);
+            .cfgr
+            .sysclk(80.MHz())
+            .pclk1(80.MHz())
+            .pclk2(80.MHz())
+            .freeze(&mut flash.acr, &mut pwr);
 
         // configure monotonic time
         let mono = DwtSystick::new(
@@ -138,13 +140,13 @@ mod app {
         );
 
         // configure status led
-        let status_led = gpiob
+        let led_status = gpiob
             .pb13
             .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
 
         // TODO: 8 buttons in total
         // figure out a way to have all these in an array or map {button: pin}
-        let left_indicator_btn = {
+        let btn_indicator_left = {
             let mut btn = gpioa
                 .pa8
                 .into_pull_up_input(&mut gpioa.moder, &mut gpioa.pupdr);
@@ -156,11 +158,11 @@ mod app {
             unsafe {
                 NVIC::unmask(stm32::Interrupt::EXTI9_5);
             }
-    
+
             btn
         };
 
-        let right_indicator_btn = {
+        let btn_indicator_right = {
             let mut btn = gpiob
                 .pb5
                 .into_pull_up_input(&mut gpiob.moder, &mut gpiob.pupdr);
@@ -172,11 +174,11 @@ mod app {
             unsafe {
                 NVIC::unmask(stm32::Interrupt::EXTI9_5);
             }
-    
+
             btn
         };
 
-        let horn_btn = {
+        let btn_horn = {
             let mut btn = gpioa
                 .pa14
                 .into_pull_up_input(&mut gpioa.moder, &mut gpioa.pupdr);
@@ -188,7 +190,7 @@ mod app {
             unsafe {
                 NVIC::unmask(stm32::Interrupt::EXTI9_5);
             }
-        
+
             btn
         };
 
@@ -252,17 +254,23 @@ mod app {
 
         // configure can bus
         let can = {
-            let rx =
-                gpioa
-                    .pa11
-                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh);
-            let tx =
-                gpioa
-                    .pa12
-                    .into_alternate(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh);
+            let rx = gpioa.pa11.into_alternate(
+                &mut gpioa.moder,
+                &mut gpioa.otyper,
+                &mut gpioa.afrh,
+            );
+            let tx = gpioa.pa12.into_alternate(
+                &mut gpioa.moder,
+                &mut gpioa.otyper,
+                &mut gpioa.afrh,
+            );
 
-            let can = bxcan::Can::builder(Can::new(&mut rcc.apb1r1, cx.device.CAN1, (tx, rx)))
-                .set_bit_timing(0x001c_0009); // 500kbit/s
+            let can = bxcan::Can::builder(Can::new(
+                &mut rcc.apb1r1,
+                cx.device.CAN1,
+                (tx, rx),
+            ))
+            .set_bit_timing(0x001c_0009); // 500kbit/s
 
             let mut can = can.enable();
 
@@ -293,6 +301,7 @@ mod app {
 
         // sd_card_write::spawn().unwrap();
         run::spawn().unwrap();
+        heartbeat::spawn().unwrap();
 
         (
             Shared {
@@ -300,10 +309,10 @@ mod app {
             },
             Local {
                 watchdog,
-                status_led,
-                left_indicator_btn,
-                right_indicator_btn,
-                horn_btn,
+                led_status,
+                btn_indicator_left,
+                btn_indicator_right,
+                btn_horn,
                 // sdmmc_controller,
                 volume,
                 root_dir
@@ -315,7 +324,7 @@ mod app {
     // TODO each task needs rising or falling edge as parameter
 
     #[task(priority = 1, local = [watchdog])]
-    fn run(mut cx: run::Context) {
+    fn run(cx: run::Context) {
         defmt::trace!("task: run");
 
         cx.local.watchdog.feed();
@@ -355,66 +364,89 @@ mod app {
         
     // }
 
-    /// Triggers on interrupt event.
-    #[task(priority = 1, binds = EXTI9_5)]
-    fn exti9_5_pending(_: exti9_5_pending::Context) {
-        defmt::trace!("task: exti9_5 pending");
+    #[task(local = [led_status], shared = [can])]
+    fn heartbeat(mut cx: heartbeat::Context) {
+        defmt::trace!("task: heartbeat");
 
-        exti9_5_receive::spawn().unwrap();
+        cx.local.led_status.toggle();
+
+        if cx.local.led_status.is_set_low() {
+            cx.shared.can.lock(|can| {
+                let _ = can.transmit(&com::heartbeat::message(DEVICE));
+            });
+        }
+
+        // repeat every second
+        heartbeat::spawn_after(500.millis().into()).unwrap();
     }
 
-    #[task(priority = 2, local=[left_indicator_btn, right_indicator_btn, horn_btn], shared = [can])]
-    fn exti9_5_receive(mut cx: exti9_5_receive::Context) {
-        defmt::trace!("task: exti9_5 receive");
+    /// Triggers on interrupt event.
+    #[task(priority = 1, binds = EXTI9_5, local = [btn_indicator_left, btn_indicator_right, btn_horn])]
+    fn exti9_5_pending(cx: exti9_5_pending::Context) {
+        defmt::trace!("task: exti9_5 pending");
 
-        let left_indicator_btn = cx.local.left_indicator_btn;
-        let right_indicator_btn = cx.local.right_indicator_btn;
-        let horn_btn = cx.local.horn_btn;
-        
+        let left_indicator_btn = cx.local.btn_indicator_left;
+        let right_indicator_btn = cx.local.btn_indicator_right;
+        let horn_btn = cx.local.btn_horn;
+
         if left_indicator_btn.check_interrupt() {
-            defmt::trace!("Interrupt triggered on {:?}", left_indicator_btn.pin_id());
             left_indicator_btn.clear_interrupt_pending_bit();
-            handle_left_indicator_light::spawn().unwrap();
+            button_indicator_left_handler::spawn(left_indicator_btn.is_high())
+                .unwrap();
         }
 
         if right_indicator_btn.check_interrupt() {
-            defmt::trace!("Interrupt triggered on {:?}", right_indicator_btn.pin_id());
             right_indicator_btn.clear_interrupt_pending_bit();
-            handle_right_indicator_light::spawn().unwrap();
+            button_indicator_right_handler::spawn(
+                right_indicator_btn.is_high(),
+            )
+            .unwrap();
         }
 
         if horn_btn.check_interrupt() {
-            defmt::trace!("Interrupt triggered on {:?}", horn_btn.pin_id());
             horn_btn.clear_interrupt_pending_bit();
-            handle_horn::spawn().unwrap();
+            button_horn_handler::spawn(horn_btn.is_high()).unwrap();
         }
     }
 
+    /// Handle left indictor button state change
     #[task(priority = 2, shared = [can])]
-    fn handle_left_indicator_light(mut cx: handle_left_indicator_light::Context) {
+    fn button_indicator_left_handler(
+        mut cx: button_indicator_left_handler::Context,
+        state: bool,
+    ) {
         defmt::trace!("task: can send left indicator frame");
-        let light_frame = com::lighting::message(DEVICE, com::lighting::LampsState::INDICATOR_LEFT.bits());
+        let light_frame = com::lighting::message(
+            DEVICE,
+            com::lighting::LampsState::INDICATOR_LEFT.bits(),
+        );
 
         cx.shared.can.lock(|can| {
-            can.transmit(&light_frame);
+            let _ = can.transmit(&light_frame);
         });
     }
 
+    /// Handle left indicator button state change
     #[task(priority = 2, shared = [can])]
-    fn handle_right_indicator_light(mut cx: handle_right_indicator_light::Context) {
+    fn button_indicator_right_handler(
+        mut cx: button_indicator_right_handler::Context,
+        state: bool,
+    ) {
         defmt::trace!("task: can send right indicator frame");
-        let light_frame = com::lighting::message(DEVICE, com::lighting::LampsState::INDICATOR_RIGHT.bits());
+        let light_frame = com::lighting::message(
+            DEVICE,
+            com::lighting::LampsState::INDICATOR_RIGHT.bits(),
+        );
 
         cx.shared.can.lock(|can| {
-            can.transmit(&light_frame);
+            let _ = can.transmit(&light_frame);
         });
     }
 
+    /// Handle horn button state change
     #[task(priority = 2, shared = [can])]
-    fn handle_horn(mut cx: handle_horn::Context) {
-        cx.shared.can.lock(|can| {
-
-        });
+    fn button_horn_handler(mut cx: button_horn_handler::Context, state: bool) {
+        cx.shared.can.lock(|can| {});
     }
 
     #[idle]
