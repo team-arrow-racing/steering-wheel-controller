@@ -27,11 +27,12 @@ use embedded_hal::{
 
 use stm32l4xx_hal::{
     can::Can,
-    device::{CAN1,SPI1},
+    device::{CAN1, SPI1},
     flash::FlashExt,
     gpio::{Alternate, Edge, ExtiPin, Input, OpenDrain, Output, PinExt, PullUp, PushPull, PA4, PA5, PA6, PA7, PA8, PA10, PA11, PA12, PA13, PA14, PB5, PB11, PB13,},
     prelude::*,
     stm32,
+    watchdog::IndependentWatchdog,
     spi::Spi,
 };
 
@@ -212,7 +213,7 @@ mod app {
 
         dc.set_low();
 
-        let mut spi = Spi::spi1(
+        let spi = Spi::spi1(
             cx.device.SPI1,
             (sck, miso, mosi),
             MODE,
