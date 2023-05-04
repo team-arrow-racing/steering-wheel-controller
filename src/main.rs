@@ -235,7 +235,6 @@ mod app {
         let mut volume = match sdmmc_controller.get_volume(embedded_sdmmc::VolumeIdx(0)) {
             Ok(volume) => volume,
             Err(e) => {
-                defmt::debug!("Error getting volume 0: {:?}!", e);
                 panic!("Error getting volume 0: {:?}!", e);
             },
         };
@@ -243,14 +242,13 @@ mod app {
         let root_dir = match sdmmc_controller.open_root_dir(&volume) {
             Ok(root_dir) => root_dir,
             Err(e) => {
-                defmt::debug!("Error getting root directory on volume 0: {:?}!", e);
                 panic!("Error getting root directory on volume 0: {:?}!", e);
             },
         };
 
         match sdmmc_controller.device().card_size_bytes() {
             Ok(size) => defmt::debug!( "Card size: {}", size),
-            Err(e) => defmt::debug!("Error reading card size: {:?}", e),
+            Err(e) => defmt::debug!("Error reading card size"),
         }
 
         // configure can bus
