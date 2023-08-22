@@ -70,6 +70,7 @@ mod app {
         led_status: PB13<Output<PushPull>>,
         btn_indicator_left: PA8<Input<PullUp>>,
         btn_indicator_right: PB5<Input<PullUp>>, // TODO figure out which pins
+        display: speed_display, // Add this line
         btn_horn: PA14<Input<PullUp>>,
     }
 
@@ -190,9 +191,7 @@ mod app {
         //     DisplaySize240x320,
         // ).unwrap();
 
-        let display = SpeedDisplay::new(display_driver);
-        /////////////////////////////////////////////////////////////
-        /// End TODO: Setup display
+        let display = speed_display::new(display_driver);
         /////////////////////////////////////////////////////////////
 
         // configure can bus
@@ -253,7 +252,7 @@ mod app {
                 btn_indicator_left,
                 btn_indicator_right,
                 btn_horn,
-                display: SpeedDisplay,
+                display,
             },
             init::Monotonics(mono),
         )
