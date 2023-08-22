@@ -21,6 +21,7 @@ use panic_probe as _;
 
 use dwt_systick_monotonic::{fugit, DwtSystick};
 use solar_car::{com, device};
+use arrow_display::speed_display;
 
 use stm32l4xx_hal::{
     can::Can,
@@ -153,6 +154,9 @@ mod app {
             btn
         };
 
+        // TODO: setup correctly
+        let display = SpeedDisplay::new();
+
         // configure can bus
         let can = {
             let rx = gpioa.pa11.into_alternate(
@@ -211,6 +215,7 @@ mod app {
                 btn_indicator_left,
                 btn_indicator_right,
                 btn_horn,
+                display: SpeedDisplay,
             },
             init::Monotonics(mono),
         )
@@ -310,6 +315,18 @@ mod app {
     #[task(priority = 2, shared = [can])]
     fn button_horn_handler(mut cx: button_horn_handler::Context, state: bool) {
         cx.shared.can.lock(|can| {});
+    }
+
+    /// Handle updating of speed
+    #[task(priority = 1, shared = [can], local = [display])]
+    fn speed_displayer(mut cx: speed_displayer::Context) {
+        // Receive speed via `can`
+        let speed = cx.shared.can.lock(|can| {
+            // TODO: something goes here yeah?
+        });
+
+        // Display the speed
+        cx.local.display.show_speed(speed);
     }
 
     #[idle]
