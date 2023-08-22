@@ -22,6 +22,7 @@ use panic_probe as _;
 use dwt_systick_monotonic::{fugit, DwtSystick};
 use solar_car::{com, device};
 use arrow_display::speed_display;
+use ili9341::Ili9341;
 
 use stm32l4xx_hal::{
     can::Can,
@@ -154,8 +155,45 @@ mod app {
             btn
         };
 
-        // TODO: setup correctly
-        let display = SpeedDisplay::new();
+        /////////////////////////////////////////////////////////////
+        // TODO: setup correctly, just pulled atm from example:
+        // https://github.com/yuri91/ili9341-rs/blob/master/examples/rtic.rs
+        /////////////////////////////////////////////////////////////
+        // let dp = cx.device;
+        // let rcc = dp.RCC.constrain();
+        // let clocks = rcc.cfgr.use_hse(25.MHz()).sysclk(100.MHz()).freeze();
+
+        // let gpioa = dp.GPIOA.split();
+        // let gpiob = dp.GPIOB.split();
+        // // Driver
+        // let lcd_clk = gpiob.pb0.into_alternate();
+        // let lcd_miso = NoMiso {};
+        // let lcd_mosi = gpioa.pa10.into_alternate().internal_pull_up(true);
+        // let lcd_dc = gpiob.pb1.into_push_pull_output();
+        // let lcd_cs = gpiob.pb2.into_push_pull_output();
+        // let mode = Mode {
+        //     polarity: Polarity::IdleLow,
+        //     phase: Phase::CaptureOnFirstTransition,
+        // };
+        // let lcd_spi = dp
+        //     .SPI5
+        //     .spi((lcd_clk, lcd_miso, lcd_mosi), mode, 2.MHz(), &clocks);
+        // let dummy_reset = DummyOutputPin::default();
+        // let mut delay = dp.TIM1.delay_us(&clocks);
+
+        // let spi_iface = SPIInterface::new(lcd_spi, lcd_dc, lcd_cs);
+        // let display_driver = Ili9341::new(
+        //     spi_iface,
+        //     dummy_reset,
+        //     &mut delay,
+        //     Orientation::PortraitFlipped,
+        //     DisplaySize240x320,
+        // ).unwrap();
+
+        let display = SpeedDisplay::new(display_driver);
+        /////////////////////////////////////////////////////////////
+        /// End TODO: Setup display
+        /////////////////////////////////////////////////////////////
 
         // configure can bus
         let can = {
