@@ -28,10 +28,37 @@ use stm32l4xx_hal::{
     flash::FlashExt,
     gpio::{
         Alternate, Edge, ExtiPin, Input, Output, PullUp, PushPull,
-        PA11, PA12, PA14, PA8, PB13, PB5,
+        PA0, // AI2
+        PA1, // AI1
+        PA4, // PWM6
+        PA5, // PWM5
+        PA6, // PWM8
+        PA7, // PWM7
+        PA8, // DI5
+        PA9, // DI6
+        PA10, // DI7
+        PA11, // CAN RX
+        PA12, // CAN TX
+        PA14, // Horn btn (?)
+        PA15, // DI8
+        PB5, // STATUS_LED
+        PB6, // INPUT_PB
+        PC0, // PWM2
+        PC1, // PWM1
+        PC2, // PWM4
+        PC3, // PWM3
+        PC6, // DI1
+        PC7, // DI2
+        PC8, // DI3
+        PC9, // DI4
+        PC10, // DI9
+        PC11, // DI10
+        PC12, // DI11
+        PD2, // DI12
+
     },
     prelude::*,
-    stm32,
+    stm32::Interrupt,
     watchdog::IndependentWatchdog,
 };
 
@@ -65,9 +92,9 @@ mod app {
     #[local]
     struct Local {
         watchdog: IndependentWatchdog,
-        led_status: PB13<Output<PushPull>>,
-        btn_indicator_left: PA8<Input<PullUp>>,
-        btn_indicator_right: PB5<Input<PullUp>>, // TODO figure out which pins
+        led_status: PB5<Output<PushPull>>,
+        btn_indicator_left: PC6<Input<PullUp>>,
+        btn_indicator_right: PC7<Input<PullUp>>, // TODO figure out which pins
         btn_horn: PA14<Input<PullUp>>,
     }
 
@@ -81,6 +108,7 @@ mod app {
         let mut pwr = cx.device.PWR.constrain(&mut rcc.apb1r1);
         let mut gpioa = cx.device.GPIOA.split(&mut rcc.ahb2);
         let mut gpiob = cx.device.GPIOB.split(&mut rcc.ahb2);
+        let mut gpioc = cx.device.GPIOC.split(&mut rcc.ahb2);
 
         // configure system clock
         let clocks = rcc
@@ -100,38 +128,55 @@ mod app {
 
         // configure status led
         let led_status = gpiob
-            .pb13
+            .pb5
             .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
+
+        // TODO figure out which pins are which LEDs
+        // Left Indicator light
+        // let led_indicator_left = gpioc
+        //     .pc8
+        //     .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
+
+        // Right Indicator light
+        // let led_indicator_right = gpiob
+        //     .pb13
+        //     .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
+
+        // Hazard lights will be both on at once
+        // Energy storage systems warining light
+        // let led_sys_warning = gpiob
+        //     .pb13
+        //     .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
 
         // TODO: 8 buttons in total
         // figure out a way to have all these in an array or map {button: pin}
         let btn_indicator_left = {
-            let mut btn = gpioa
-                .pa8
-                .into_pull_up_input(&mut gpioa.moder, &mut gpioa.pupdr);
+            let mut btn = gpioc
+                .pc6
+                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
             btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
             btn.enable_interrupt(&mut cx.device.EXTI);
             btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
 
             unsafe {
-                NVIC::unmask(stm32::Interrupt::EXTI9_5);
+                NVIC::unmask(Interrupt::EXTI9_5);
             }
 
             btn
         };
 
         let btn_indicator_right = {
-            let mut btn = gpiob
-                .pb5
-                .into_pull_up_input(&mut gpiob.moder, &mut gpiob.pupdr);
+            let mut btn = gpioc
+                .pc7
+                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
             btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
             btn.enable_interrupt(&mut cx.device.EXTI);
             btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
 
             unsafe {
-                NVIC::unmask(stm32::Interrupt::EXTI9_5);
+                NVIC::unmask(Interrupt::EXTI9_5);
             }
 
             btn
@@ -147,7 +192,72 @@ mod app {
             btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
 
             unsafe {
-                NVIC::unmask(stm32::Interrupt::EXTI9_5);
+                NVIC::unmask(Interrupt::EXTI9_5);
+            }
+
+            btn
+        };
+
+        // TODO figure out which buttons are which pins
+        let btn_drive = {
+            let mut btn = gpioc
+                .pc8
+                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
+
+            btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
+            btn.enable_interrupt(&mut cx.device.EXTI);
+            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
+
+            unsafe {
+                NVIC::unmask(Interrupt::EXTI9_5);
+            }
+
+            btn
+        };
+
+        let btn_neutral = {
+            let mut btn = gpioc
+                .pc9
+                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
+
+            btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
+            btn.enable_interrupt(&mut cx.device.EXTI);
+            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
+
+            unsafe {
+                NVIC::unmask(Interrupt::EXTI9_5);
+            }
+
+            btn
+        };
+
+        let btn_reverse = {
+            let mut btn = gpioc
+                .pc10
+                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
+
+            btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
+            btn.enable_interrupt(&mut cx.device.EXTI);
+            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
+
+            unsafe {
+                NVIC::unmask(Interrupt::EXTI9_5);
+            }
+
+            btn
+        };
+
+        let btn_cruise = {
+            let mut btn = gpioc
+                .pc11
+                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
+
+            btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
+            btn.enable_interrupt(&mut cx.device.EXTI);
+            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
+
+            unsafe {
+                NVIC::unmask(Interrupt::EXTI9_5);
             }
 
             btn
