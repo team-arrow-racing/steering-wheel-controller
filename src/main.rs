@@ -20,13 +20,17 @@ use defmt_rtt as _;
 use panic_probe as _;
 
 use dwt_systick_monotonic::{fugit, DwtSystick};
-use solar_car::{com, device};
-use arrow_display::speed_display;
-use ili9341::Ili9341;
+use solar_car::{
+    com, device, j1939,
+    j1939::pgn::{Number, Pgn},
+};
+
+use bxcan::{filter::Mask32, Frame, Id, Interrupts};
 
 use stm32l4xx_hal::{
     can::Can,
     device::CAN1,
+    delay::DelayCM,
     flash::FlashExt,
     gpio::{
         Alternate, Edge, ExtiPin, Input, Output, PullUp, PushPull,
@@ -65,9 +69,68 @@ use stm32l4xx_hal::{
 };
 
 use cortex_m::peripheral::NVIC;
+mod lcd;
+
+use lcd::LCD;
 
 const DEVICE: device::Device = device::Device::SteeringWheel;
 const SYSCLK: u32 = 80_000_000;
+pub const WARNING_CODES: &str = "ABCDEFG";
+
+pub mod write_to {
+    use core::cmp::min;
+    use core::fmt;
+
+    pub struct WriteTo<'a> {
+        buffer: &'a mut [u8],
+        // on write error (i.e. not enough space in buffer) this grows beyond
+        // `buffer.len()`.
+        used: usize,
+    }
+
+    impl<'a> WriteTo<'a> {
+        pub fn new(buffer: &'a mut [u8]) -> Self {
+            WriteTo { buffer, used: 0 }
+        }
+
+        pub fn as_str(self) -> Option<&'a str> {
+            if self.used <= self.buffer.len() {
+                // only successful concats of str - must be a valid str.
+                use core::str::from_utf8_unchecked;
+                Some(unsafe { from_utf8_unchecked(&self.buffer[..self.used]) })
+            } else {
+                None
+            }
+        }
+    }
+
+    impl<'a> fmt::Write for WriteTo<'a> {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            if self.used > self.buffer.len() {
+                return Err(fmt::Error);
+            }
+            let remaining_buf = &mut self.buffer[self.used..];
+            let raw_s = s.as_bytes();
+            let write_num = min(raw_s.len(), remaining_buf.len());
+            remaining_buf[..write_num].copy_from_slice(&raw_s[..write_num]);
+            self.used += raw_s.len();
+            if write_num < raw_s.len() {
+                Err(fmt::Error)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    pub fn show<'a>(
+        buffer: &'a mut [u8],
+        args: fmt::Arguments,
+    ) -> Result<&'a str, fmt::Error> {
+        let mut w = WriteTo::new(buffer);
+        fmt::write(&mut w, args)?;
+        w.as_str().ok_or(fmt::Error)
+    }
+}
 
 #[rtic::app(device = stm32l4xx_hal::pac, dispatchers = [SPI1, SPI2, SPI3, QUADSPI])]
 mod app {
@@ -89,6 +152,12 @@ mod app {
                 (PA12<Alternate<PushPull, 9>>, PA11<Alternate<PushPull, 9>>),
             >,
         >,
+        speed: u8,
+        battery: u8,
+        temperature: u8,
+        left_indicator: bool,
+        right_indicator: bool,
+        warnings: [u8; 6]
     }
 
     #[local]
@@ -98,6 +167,7 @@ mod app {
         btn_indicator_left: PC6<Input<PullUp>>,
         btn_indicator_right: PC7<Input<PullUp>>, // TODO figure out which pins
         btn_horn: PA14<Input<PullUp>>,
+        lcd_disp: LCD
     }
 
     #[init]
@@ -132,23 +202,6 @@ mod app {
         let led_status = gpiob
             .pb5
             .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
-
-        // TODO figure out which pins are which LEDs
-        // Left Indicator light
-        // let led_indicator_left = gpioc
-        //     .pc8
-        //     .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
-
-        // Right Indicator light
-        // let led_indicator_right = gpiob
-        //     .pb13
-        //     .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
-
-        // Hazard lights will be both on at once
-        // Energy storage systems warining light
-        // let led_sys_warning = gpiob
-        //     .pb13
-        //     .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
 
         // TODO: 8 buttons in total
         // figure out a way to have all these in an array or map {button: pin}
@@ -265,43 +318,36 @@ mod app {
             btn
         };
 
-        /////////////////////////////////////////////////////////////
-        // TODO: setup correctly, just pulled atm from example:
-        // https://github.com/yuri91/ili9341-rs/blob/master/examples/rtic.rs
-        /////////////////////////////////////////////////////////////
-        // let dp = cx.device;
-        // let rcc = dp.RCC.constrain();
-        // let clocks = rcc.cfgr.use_hse(25.MHz()).sysclk(100.MHz()).freeze();
+        let mut lcd_disp = {
+            let rs = gpioc
+                .pc2
+                .into_push_pull_output(&mut gpioc.moder, &mut gpioc.otyper);
+            let en = gpioc
+                .pc3
+                .into_push_pull_output(&mut gpioc.moder, &mut gpioc.otyper);
+            let d4 = gpioa
+                .pa6
+                .into_push_pull_output(&mut gpioa.moder, &mut gpioa.otyper);
+            let d5 = gpioa
+                .pa7
+                .into_push_pull_output(&mut gpioa.moder, &mut gpioa.otyper);
+            let d6 = gpioa
+                .pa4
+                .into_push_pull_output(&mut gpioa.moder, &mut gpioa.otyper);
+            let d7 = gpioa
+                .pa5
+                .into_push_pull_output(&mut gpioa.moder, &mut gpioa.otyper);
+            // let delay = Delay::new(cx.core.SYST, clocks);
+            let delay_cm = DelayCM::new(clocks);
 
-        // let gpioa = dp.GPIOA.split();
-        // let gpiob = dp.GPIOB.split();
-        // // Driver
-        // let lcd_clk = gpiob.pb0.into_alternate();
-        // let lcd_miso = NoMiso {};
-        // let lcd_mosi = gpioa.pa10.into_alternate().internal_pull_up(true);
-        // let lcd_dc = gpiob.pb1.into_push_pull_output();
-        // let lcd_cs = gpiob.pb2.into_push_pull_output();
-        // let mode = Mode {
-        //     polarity: Polarity::IdleLow,
-        //     phase: Phase::CaptureOnFirstTransition,
-        // };
-        // let lcd_spi = dp
-        //     .SPI5
-        //     .spi((lcd_clk, lcd_miso, lcd_mosi), mode, 2.MHz(), &clocks);
-        // let dummy_reset = DummyOutputPin::default();
-        // let mut delay = dp.TIM1.delay_us(&clocks);
+            let mut disp = LCD::new(
+                rs, en, d4, d5, d6, d7, delay_cm,
+            );
 
-        // let spi_iface = SPIInterface::new(lcd_spi, lcd_dc, lcd_cs);
-        // let display_driver = Ili9341::new(
-        //     spi_iface,
-        //     dummy_reset,
-        //     &mut delay,
-        //     Orientation::PortraitFlipped,
-        //     DisplaySize240x320,
-        // ).unwrap();
+            disp
+        };
 
-        let display = speed_display::new(display_driver);
-        /////////////////////////////////////////////////////////////
+        lcd_disp.init();
 
         // configure can bus
         let can = {
@@ -352,16 +398,25 @@ mod app {
 
         run::spawn().unwrap();
         heartbeat::spawn().unwrap();
+        update_display::spawn().unwrap();
 
         (
-            Shared { can },
+            Shared { 
+                can,
+                speed: 100,
+                battery: 12, 
+                temperature: 65,
+                left_indicator: false,
+                right_indicator: false,
+                warnings: [0, 0, 0, 0, 0, 0] 
+            },
             Local {
                 watchdog,
                 led_status,
                 btn_indicator_left,
                 btn_indicator_right,
                 btn_horn,
-                display,
+                lcd_disp
             },
             init::Monotonics(mono),
         )
@@ -434,6 +489,7 @@ mod app {
             DEVICE,
             com::lighting::LampsState::INDICATOR_LEFT.bits(),
         );
+        // TODO change l and r to show on display
 
         cx.shared.can.lock(|can| {
             let _ = can.transmit(&light_frame);
@@ -464,15 +520,155 @@ mod app {
     }
 
     /// Handle updating of speed
-    #[task(priority = 1, shared = [can], local = [display])]
-    fn speed_displayer(mut cx: speed_displayer::Context) {
-        // Receive speed via `can`
-        let speed = cx.shared.can.lock(|can| {
-            // TODO: something goes here yeah?
-        });
+    #[task(shared = [speed, battery, temperature, left_indicator, right_indicator, warnings], local=[lcd_disp])]
+    fn update_display(cx: update_display::Context) {
+        let speed = cx.shared.speed;
+        let battery = cx.shared.battery;
+        let temp = cx.shared.temperature;
+        let l_ind = cx.shared.left_indicator;
+        let r_ind = cx.shared.right_indicator;
+        let warns = cx.shared.warnings;
+       
 
-        // Display the speed
-        cx.local.display.show_speed(speed);
+        let lcd = cx.local.lcd_disp;
+
+        (speed, battery, temp, l_ind, r_ind, warns).lock(|speed, battery, temp, l_ind, r_ind, warns| {
+            // Display look should as following
+            // |L_100_100_100_R|
+            // |    ABCDEFG    |
+            // Start by clearing everything
+            lcd.clear_display();
+            // Set indicator status
+            if *l_ind {
+                lcd.set_position(0, 0);
+                lcd.send_string("L");
+            }
+
+            if *r_ind {
+                lcd.set_position(15, 0);
+                lcd.send_string("R");
+            }
+
+            let mut data_buf = [0; 3];
+
+            let mut vehicle_data = crate::write_to::show(
+                &mut data_buf,
+                format_args!(
+                    "{}",
+                    battery
+                ),
+            )
+            .unwrap();
+
+            lcd.set_position(2, 0);
+            lcd.send_string(vehicle_data);
+
+            vehicle_data = crate::write_to::show(
+                &mut data_buf,
+                format_args!(
+                    "{}",
+                    speed
+                ),
+            )
+            .unwrap();
+
+            lcd.set_position(6, 0);
+            lcd.send_string(vehicle_data);
+
+            vehicle_data = crate::write_to::show(
+                &mut data_buf,
+                format_args!(
+                    "{}",
+                    temp
+                ),
+            )
+            .unwrap();
+
+            lcd.set_position(10, 0);
+            lcd.send_string(vehicle_data);
+            
+            // Warnings
+            for i in 0..warns.len() {
+                lcd.set_position((4 + i).try_into().unwrap(), 1);
+                if warns[i] == 1 {
+                    lcd.send_data(WARNING_CODES.chars().nth(i).unwrap().try_into().unwrap());
+                } else {
+                    lcd.send_string("_");
+                }
+            }
+
+            update_display::spawn_after(Duration::millis(10)).unwrap();
+
+        });
+    }
+
+    /// Triggers on RX mailbox event.
+    #[task(priority = 1, shared = [can], binds = CAN1_RX0)]
+    fn can_rx0_pending(_: can_rx0_pending::Context) {
+        defmt::trace!("task: can rx0 pending");
+
+        can_receive::spawn().unwrap();
+    }
+
+    /// Triggers on RX mailbox event.
+    #[task(priority = 1, shared = [can], binds = CAN1_RX1)]
+    fn can_rx1_pending(_: can_rx1_pending::Context) {
+        defmt::trace!("task: can rx1 pending");
+
+        can_receive::spawn().unwrap();
+    }
+
+    #[task(priority = 2, shared = [can, speed, battery, temperature, left_indicator, right_indicator, warnings])]
+    fn can_receive(mut cx: can_receive::Context) {
+        defmt::trace!("task: can receive");
+
+        cx.shared.can.lock(|can| loop {
+            let frame = match can.receive() {
+                Ok(frame) => frame,
+                Err(nb::Error::WouldBlock) => break, // done
+                Err(nb::Error::Other(_)) => continue, // go to next frame
+            };
+
+            let id = match frame.id() {
+                Id::Standard(_) => {
+                    continue; // go to next frame
+                }
+                Id::Extended(id) => id,
+            };
+
+            let id: j1939::ExtendedId = id.into();
+
+            match id.pgn {
+                Pgn::Destination(pgn) => match pgn {
+                    com::wavesculptor::PGN_BATTERY_MESSAGE => {
+                        cx.shared.battery.lock(|battery| {
+                            if let Some(data) = frame.data() {
+                                // TODO might need to handle multiple bits
+                                *battery = data[0];
+                            }
+                        });
+                    },
+                    com::wavesculptor::PGN_SPEED_MESSAGE => {
+                        cx.shared.speed.lock(|speed| {
+                            if let Some(data) = frame.data() {
+                                *speed = data[0];
+                            }
+                        });
+                    },
+                    com::wavesculptor::PGN_TEMPERATURE_MESSAGE => {
+                        cx.shared.temperature.lock(|temp| {
+                            if let Some(data) = frame.data() {
+                                *temp = data[0];
+                            }
+                        });
+                    },
+                    _ => {
+                        defmt::debug!("whut happun")
+                    }
+                },
+                _ => {} // ignore broadcast messages
+            }
+        });
     }
 
     #[idle]
