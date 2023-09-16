@@ -26,6 +26,7 @@ use solar_car::{
 };
 
 use bxcan::{filter::Mask32, Frame, Id, Interrupts};
+use numtoa::NumToA;
 
 use stm32l4xx_hal::{
     can::Can,
@@ -77,61 +78,6 @@ const DEVICE: device::Device = device::Device::SteeringWheel;
 const SYSCLK: u32 = 80_000_000;
 pub const WARNING_CODES: &str = "ABCDEFG";
 
-pub mod write_to {
-    use core::cmp::min;
-    use core::fmt;
-
-    pub struct WriteTo<'a> {
-        buffer: &'a mut [u8],
-        // on write error (i.e. not enough space in buffer) this grows beyond
-        // `buffer.len()`.
-        used: usize,
-    }
-
-    impl<'a> WriteTo<'a> {
-        pub fn new(buffer: &'a mut [u8]) -> Self {
-            WriteTo { buffer, used: 0 }
-        }
-
-        pub fn as_str(self) -> Option<&'a str> {
-            if self.used <= self.buffer.len() {
-                // only successful concats of str - must be a valid str.
-                use core::str::from_utf8_unchecked;
-                Some(unsafe { from_utf8_unchecked(&self.buffer[..self.used]) })
-            } else {
-                None
-            }
-        }
-    }
-
-    impl<'a> fmt::Write for WriteTo<'a> {
-        fn write_str(&mut self, s: &str) -> fmt::Result {
-            if self.used > self.buffer.len() {
-                return Err(fmt::Error);
-            }
-            let remaining_buf = &mut self.buffer[self.used..];
-            let raw_s = s.as_bytes();
-            let write_num = min(raw_s.len(), remaining_buf.len());
-            remaining_buf[..write_num].copy_from_slice(&raw_s[..write_num]);
-            self.used += raw_s.len();
-            if write_num < raw_s.len() {
-                Err(fmt::Error)
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    pub fn show<'a>(
-        buffer: &'a mut [u8],
-        args: fmt::Arguments,
-    ) -> Result<&'a str, fmt::Error> {
-        let mut w = WriteTo::new(buffer);
-        fmt::write(&mut w, args)?;
-        w.as_str().ok_or(fmt::Error)
-    }
-}
-
 #[rtic::app(device = stm32l4xx_hal::pac, dispatchers = [SPI1, SPI2, SPI3, QUADSPI])]
 mod app {
 
@@ -143,20 +89,18 @@ mod app {
     type MonoTimer = DwtSystick<SYSCLK>;
     pub type Duration = fugit::TimerDuration<u64, SYSCLK>;
     pub type Instant = fugit::TimerInstant<u64, SYSCLK>;
+    pub type Can1Pins = (PA12<Alternate<PushPull, 9>>, PA11<Alternate<PushPull, 9>>);
 
     #[shared]
     struct Shared {
-        can: bxcan::Can<
-            Can<
-                CAN1,
-                (PA12<Alternate<PushPull, 9>>, PA11<Alternate<PushPull, 9>>),
-            >,
-        >,
+        can: bxcan::Can<Can<CAN1, Can1Pins>>,
         speed: u8,
         battery: u8,
         temperature: u8,
-        left_indicator: bool,
+        left_indicator: bool, // What shows on the LCD screen, meant to be toggled while input is true
         right_indicator: bool,
+        input_left_indicator: bool, // Input from user, acts as a toggle switch
+        input_right_indicator: bool, 
         warnings: [u8; 6]
     }
 
@@ -340,7 +284,7 @@ mod app {
             // let delay = Delay::new(cx.core.SYST, clocks);
             let delay_cm = DelayCM::new(clocks);
 
-            let mut disp = LCD::new(
+            let disp = LCD::new(
                 rs, en, d4, d5, d6, d7, delay_cm,
             );
 
@@ -397,7 +341,7 @@ mod app {
         };
 
         run::spawn().unwrap();
-        heartbeat::spawn().unwrap();
+        heartbeat::spawn_after(Duration::millis(2000)).unwrap();
         update_display::spawn().unwrap();
 
         (
@@ -408,6 +352,8 @@ mod app {
                 temperature: 65,
                 left_indicator: false,
                 right_indicator: false,
+                input_left_indicator: false,
+                input_right_indicator: false,
                 warnings: [0, 0, 0, 0, 0, 0] 
             },
             Local {
@@ -446,7 +392,7 @@ mod app {
         }
 
         // repeat every second
-        heartbeat::spawn_after(500.millis().into()).unwrap();
+        heartbeat::spawn_after(2000.millis().into()).unwrap();
     }
 
     /// Triggers on interrupt event.
@@ -454,32 +400,32 @@ mod app {
     fn exti9_5_pending(cx: exti9_5_pending::Context) {
         defmt::trace!("task: exti9_5 pending");
 
-        let left_indicator_btn = cx.local.btn_indicator_left;
-        let right_indicator_btn = cx.local.btn_indicator_right;
-        let horn_btn = cx.local.btn_horn;
+        let btn_ind_left = cx.local.btn_indicator_left;
+        let btn_ind_right = cx.local.btn_indicator_right;
+        let btn_horn = cx.local.btn_horn;
 
-        if left_indicator_btn.check_interrupt() {
-            left_indicator_btn.clear_interrupt_pending_bit();
-            button_indicator_left_handler::spawn(left_indicator_btn.is_high())
+        if btn_ind_left.check_interrupt() {
+            btn_ind_left.clear_interrupt_pending_bit();
+            button_indicator_left_handler::spawn(btn_ind_left.is_high())
                 .unwrap();
         }
 
-        if right_indicator_btn.check_interrupt() {
-            right_indicator_btn.clear_interrupt_pending_bit();
+        if btn_ind_right.check_interrupt() {
+            btn_ind_right.clear_interrupt_pending_bit();
             button_indicator_right_handler::spawn(
-                right_indicator_btn.is_high(),
+                btn_ind_right.is_high(),
             )
             .unwrap();
         }
 
-        if horn_btn.check_interrupt() {
-            horn_btn.clear_interrupt_pending_bit();
-            button_horn_handler::spawn(horn_btn.is_high()).unwrap();
+        if btn_horn.check_interrupt() {
+            btn_horn.clear_interrupt_pending_bit();
+            button_horn_handler::spawn(btn_horn.is_high()).unwrap();
         }
     }
 
     /// Handle left indictor button state change
-    #[task(priority = 2, shared = [can])]
+    #[task(priority = 2, shared = [can, input_left_indicator])]
     fn button_indicator_left_handler(
         mut cx: button_indicator_left_handler::Context,
         state: bool,
@@ -487,29 +433,70 @@ mod app {
         defmt::trace!("task: can send left indicator frame");
         let light_frame = com::lighting::message(
             DEVICE,
-            com::lighting::LampsState::INDICATOR_LEFT.bits(),
+            com::lighting::LampsState::INDICATOR_LEFT.bits(), // TODO AND this with the state var?
         );
-        // TODO change l and r to show on display
+
+        cx.shared.input_left_indicator.lock(|l_input| {
+            *l_input = !*l_input;
+            toggle_left_indicator::spawn().unwrap();
+        });
 
         cx.shared.can.lock(|can| {
             let _ = can.transmit(&light_frame);
         });
     }
 
-    /// Handle left indicator button state change
-    #[task(priority = 2, shared = [can])]
+    #[task(priority = 2, shared = [input_left_indicator, left_indicator])]
+    fn toggle_left_indicator(mut cx: toggle_left_indicator::Context) {        
+        cx.shared.input_left_indicator.lock(|l_input| {
+            cx.shared.left_indicator.lock(|l_ind| {
+                *l_ind = !*l_ind;
+
+                if *l_input {
+                    toggle_left_indicator::spawn_after(Duration::millis(500)).unwrap();
+                } else {
+                    // Ensure display character is cleared
+                    *l_ind = false;
+                }
+            });
+        });
+    }
+
+    /// Handle right indicator button state change
+    #[task(priority = 2, shared = [can, input_right_indicator])]
     fn button_indicator_right_handler(
         mut cx: button_indicator_right_handler::Context,
         state: bool,
     ) {
-        defmt::trace!("task: can send right indicator frame");
+        defmt::trace!("task: can send left indicator frame");
         let light_frame = com::lighting::message(
             DEVICE,
             com::lighting::LampsState::INDICATOR_RIGHT.bits(),
         );
 
+        cx.shared.input_right_indicator.lock(|r_input| {
+            *r_input = !*r_input;
+            toggle_right_indicator::spawn().unwrap();
+        });
+
         cx.shared.can.lock(|can| {
             let _ = can.transmit(&light_frame);
+        });
+    }
+
+    #[task(priority = 2, shared = [input_right_indicator, right_indicator])]
+    fn toggle_right_indicator(mut cx: toggle_right_indicator::Context) {
+        cx.shared.input_right_indicator.lock(|r_input| {
+            cx.shared.right_indicator.lock(|r_ind| {
+                *r_ind = !*r_ind;
+
+                if *r_input {
+                    toggle_right_indicator::spawn_after(Duration::millis(500)).unwrap();
+                } else {
+                    // Ensure display character is cleared
+                    *r_ind = false;
+                }
+            });
         });
     }
 
@@ -551,38 +538,17 @@ mod app {
 
             let mut data_buf = [0; 3];
 
-            let mut vehicle_data = crate::write_to::show(
-                &mut data_buf,
-                format_args!(
-                    "{}",
-                    battery
-                ),
-            )
-            .unwrap();
+            let vehicle_data = battery.numtoa_str(10, &mut data_buf);
 
             lcd.set_position(2, 0);
             lcd.send_string(vehicle_data);
 
-            vehicle_data = crate::write_to::show(
-                &mut data_buf,
-                format_args!(
-                    "{}",
-                    speed
-                ),
-            )
-            .unwrap();
+            let vehicle_data = speed.numtoa_str(10, &mut data_buf);
 
             lcd.set_position(6, 0);
             lcd.send_string(vehicle_data);
 
-            vehicle_data = crate::write_to::show(
-                &mut data_buf,
-                format_args!(
-                    "{}",
-                    temp
-                ),
-            )
-            .unwrap();
+            let vehicle_data = temp.numtoa_str(10, &mut data_buf);
 
             lcd.set_position(10, 0);
             lcd.send_string(vehicle_data);
@@ -643,22 +609,27 @@ mod app {
                     com::wavesculptor::PGN_BATTERY_MESSAGE => {
                         cx.shared.battery.lock(|battery| {
                             if let Some(data) = frame.data() {
-                                // TODO might need to handle multiple bits
-                                *battery = data[0];
+                                if let Ok(batt_data) = data[..].try_into() {
+                                    *battery = u8::from_le_bytes(batt_data);
+                                }
                             }
                         });
                     },
                     com::wavesculptor::PGN_SPEED_MESSAGE => {
                         cx.shared.speed.lock(|speed| {
                             if let Some(data) = frame.data() {
-                                *speed = data[0];
+                                if let Ok(speed_data) = data[..].try_into() {
+                                    *speed = u8::from_le_bytes(speed_data);
+                                }
                             }
                         });
                     },
                     com::wavesculptor::PGN_TEMPERATURE_MESSAGE => {
                         cx.shared.temperature.lock(|temp| {
                             if let Some(data) = frame.data() {
-                                *temp = data[0];
+                                if let Ok(temp_data) = data[..].try_into() {
+                                    *temp = u8::from_le_bytes(temp_data);
+                                }
                             }
                         });
                     },
