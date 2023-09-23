@@ -79,12 +79,20 @@ mod lcd;
 
 use lcd::LCD;
 
+pub enum DriverModes {
+    Drive,
+    Neutral,
+    Reverse
+}
+
 pub struct LcdData {
     speed: u32,
     battery: u32,
     temperature: u32,
     left_indicator: bool, // What shows on the LCD screen, meant to be toggled while input is true
     right_indicator: bool,
+    mode: DriverModes, // Drive, Neutral, or Reverse
+    cruise: bool, 
     warnings: [u8; 6],
 }
 
@@ -364,11 +372,13 @@ mod app {
             temperature: 65,
             left_indicator: false,
             right_indicator: false,
+            mode: DriverModes::Neutral,
+            cruise: false,
             warnings: [0, 0, 0, 0, 0, 0],
         };
 
         run::spawn().unwrap();
-        heartbeat::spawn_after(Duration::millis(2000)).unwrap();
+        heartbeat::spawn_after(Duration::millis(500)).unwrap();
         update_display::spawn().unwrap();
 
         (
@@ -534,7 +544,9 @@ mod app {
         cx.shared.lcd_data.lock(|lcd_data| {
             // Display look should as following
             // |L_100_100_100_R|
-            // |    ABCDEFG    |
+            // |C   ABCDEFG   M|
+            // Top row: <Left indicator> <battery> <speed> <temperature> <Right indicator>
+            // Bot row: <Cruise enabled> <Warnings> <Driver mode>
             // Start by clearing everything
             let speed = lcd_data.speed;
             let battery = lcd_data.battery;
@@ -542,8 +554,11 @@ mod app {
             let l_ind = lcd_data.left_indicator;
             let r_ind = lcd_data.right_indicator;
             let warnings = lcd_data.warnings;
+            let cruise = lcd_data.cruise;
+            let mode = &lcd_data.mode;
 
             lcd_disp.clear_display();
+            // TOP ROW
             // Set indicator status
             if l_ind {
                 lcd_disp.set_position(0, 0);
@@ -572,6 +587,12 @@ mod app {
             lcd_disp.set_position(10, 0);
             lcd_disp.send_string(vehicle_data);
 
+            // BOTTOM ROW
+            if cruise {
+                lcd_disp.set_position(0, 1);
+                lcd_disp.send_string("C");
+            }
+
             // Warnings
             for i in 0..warnings.len() {
                 lcd_disp.set_position((4 + i).try_into().unwrap(), 1);
@@ -587,6 +608,14 @@ mod app {
                 } else {
                     lcd_disp.send_string("_");
                 }
+            }
+
+            // Driver mode
+            lcd_disp.set_position(15, 1);
+            match mode {
+                DriverModes::Drive => lcd_disp.send_string("D"),
+                DriverModes::Neutral => lcd_disp.send_string("N"),
+                DriverModes::Reverse => lcd_disp.send_string("R"),
             }
 
             update_display::spawn_after(Duration::millis(100)).unwrap();
