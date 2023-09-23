@@ -25,44 +25,49 @@ use solar_car::{
     j1939::pgn::{Number, Pgn},
 };
 
-use bxcan::{filter::Mask32, Frame, Id, Interrupts};
+use bxcan::{filter::Mask32, Frame, Id, Interrupts, StandardId};
 use numtoa::NumToA;
 
 use stm32l4xx_hal::{
     can::Can,
-    device::CAN1,
     delay::DelayCM,
+    device::CAN1,
     flash::FlashExt,
     gpio::{
-        Alternate, Edge, ExtiPin, Input, Output, PullUp, PushPull,
-        PA0, // AI2
-        PA1, // AI1
-        PA4, // PWM6
-        PA5, // PWM5
-        PA6, // PWM8
-        PA7, // PWM7
-        PA8, // DI5
-        PA9, // DI6
+        Alternate,
+        Edge,
+        ExtiPin,
+        Input,
+        Output,
+        PullUp,
+        PushPull,
+        PA0,  // AI2
+        PA1,  // AI1
         PA10, // DI7
         PA11, // CAN RX
         PA12, // CAN TX
         PA14, // Horn btn (?)
         PA15, // DI8
-        PB5, // STATUS_LED
-        PB6, // INPUT_PB
-        PC0, // PWM2
-        PC1, // PWM1
-        PC2, // PWM4
-        PC3, // PWM3
-        PC6, // DI1
-        PC7, // DI2
-        PC8, // DI3
-        PC9, // DI4
+        PA4,  // PWM6
+        PA5,  // PWM5
+        PA6,  // PWM8
+        PA7,  // PWM7
+        PA8,  // DI5
+        PA9,  // DI6
+        PB5,  // STATUS_LED
+        PB6,  // INPUT_PB
+        PC0,  // PWM2
+        PC1,  // PWM1
         PC10, // DI9
         PC11, // DI10
         PC12, // DI11
-        PD2, // DI12
-
+        PC2,  // PWM4
+        PC3,  // PWM3
+        PC6,  // DI1
+        PC7,  // DI2
+        PC8,  // DI3
+        PC9,  // DI4
+        PD2,  // DI12
     },
     prelude::*,
     stm32::Interrupt,
@@ -73,6 +78,21 @@ use cortex_m::peripheral::NVIC;
 mod lcd;
 
 use lcd::LCD;
+
+pub struct LcdData {
+    speed: u32,
+    battery: u32,
+    temperature: u32,
+    left_indicator: bool, // What shows on the LCD screen, meant to be toggled while input is true
+    right_indicator: bool,
+    warnings: [u8; 6],
+}
+
+pub struct InputButtons {
+    btn_indicator_left: PC6<Input<PullUp>>,
+    btn_indicator_right: PC7<Input<PullUp>>, // TODO figure out which pins
+    btn_horn: PA14<Input<PullUp>>,
+}
 
 const DEVICE: device::Device = device::Device::SteeringWheel;
 const SYSCLK: u32 = 80_000_000;
@@ -89,29 +109,23 @@ mod app {
     type MonoTimer = DwtSystick<SYSCLK>;
     pub type Duration = fugit::TimerDuration<u64, SYSCLK>;
     pub type Instant = fugit::TimerInstant<u64, SYSCLK>;
-    pub type Can1Pins = (PA12<Alternate<PushPull, 9>>, PA11<Alternate<PushPull, 9>>);
+    pub type Can1Pins =
+        (PA12<Alternate<PushPull, 9>>, PA11<Alternate<PushPull, 9>>);
 
     #[shared]
     struct Shared {
         can: bxcan::Can<Can<CAN1, Can1Pins>>,
-        speed: u8,
-        battery: u8,
-        temperature: u8,
-        left_indicator: bool, // What shows on the LCD screen, meant to be toggled while input is true
-        right_indicator: bool,
-        input_left_indicator: bool, // Input from user, acts as a toggle switch
-        input_right_indicator: bool, 
-        warnings: [u8; 6]
+        lcd_data: LcdData,
+        input_left_indicator: bool,
+        input_right_indicator: bool,
     }
 
     #[local]
     struct Local {
         watchdog: IndependentWatchdog,
         led_status: PB5<Output<PushPull>>,
-        btn_indicator_left: PC6<Input<PullUp>>,
-        btn_indicator_right: PC7<Input<PullUp>>, // TODO figure out which pins
-        btn_horn: PA14<Input<PullUp>>,
-        lcd_disp: LCD
+        input_buttons: InputButtons,
+        lcd_disp: LCD,
     }
 
     #[init]
@@ -262,6 +276,12 @@ mod app {
             btn
         };
 
+        let input_buttons = InputButtons {
+            btn_indicator_left,
+            btn_indicator_right,
+            btn_horn,
+        };
+
         let mut lcd_disp = {
             let rs = gpioc
                 .pc2
@@ -284,9 +304,7 @@ mod app {
             // let delay = Delay::new(cx.core.SYST, clocks);
             let delay_cm = DelayCM::new(clocks);
 
-            let disp = LCD::new(
-                rs, en, d4, d5, d6, d7, delay_cm,
-            );
+            let disp = LCD::new(rs, en, d4, d5, d6, d7, delay_cm);
 
             disp
         };
@@ -322,12 +340,12 @@ mod app {
             can.enable_interrupts(
                 Interrupts::TRANSMIT_MAILBOX_EMPTY
                     | Interrupts::FIFO0_MESSAGE_PENDING
-                    | Interrupts::FIFO1_MESSAGE_PENDING,
+                    // | Interrupts::FIFO1_MESSAGE_PENDING,
             );
             nb::block!(can.enable_non_blocking()).unwrap();
 
             // broadcast startup message.
-            can.transmit(&com::startup::message(DEVICE)).unwrap();
+            nb::block!(can.transmit(&com::startup::message(DEVICE))).unwrap();
 
             can
         };
@@ -340,29 +358,31 @@ mod app {
             wd
         };
 
+        let lcd_data = LcdData {
+            speed: 100,
+            battery: 12,
+            temperature: 65,
+            left_indicator: false,
+            right_indicator: false,
+            warnings: [0, 0, 0, 0, 0, 0],
+        };
+
         run::spawn().unwrap();
         heartbeat::spawn_after(Duration::millis(2000)).unwrap();
         update_display::spawn().unwrap();
 
         (
-            Shared { 
+            Shared {
                 can,
-                speed: 100,
-                battery: 12, 
-                temperature: 65,
-                left_indicator: false,
-                right_indicator: false,
+                lcd_data,
                 input_left_indicator: false,
                 input_right_indicator: false,
-                warnings: [0, 0, 0, 0, 0, 0] 
             },
             Local {
                 watchdog,
                 led_status,
-                btn_indicator_left,
-                btn_indicator_right,
-                btn_horn,
-                lcd_disp
+                input_buttons,
+                lcd_disp,
             },
             init::Monotonics(mono),
         )
@@ -387,22 +407,22 @@ mod app {
 
         if cx.local.led_status.is_set_low() {
             cx.shared.can.lock(|can| {
-                let _ = can.transmit(&com::heartbeat::message(DEVICE));
+                nb::block!(can.transmit(&com::heartbeat::message(DEVICE))).unwrap();
             });
         }
 
         // repeat every second
-        heartbeat::spawn_after(2000.millis().into()).unwrap();
+        heartbeat::spawn_after(500.millis().into()).unwrap();
     }
 
     /// Triggers on interrupt event.
-    #[task(priority = 1, binds = EXTI9_5, local = [btn_indicator_left, btn_indicator_right, btn_horn])]
+    #[task(priority = 1, binds = EXTI9_5, local = [input_buttons])]
     fn exti9_5_pending(cx: exti9_5_pending::Context) {
         defmt::trace!("task: exti9_5 pending");
 
-        let btn_ind_left = cx.local.btn_indicator_left;
-        let btn_ind_right = cx.local.btn_indicator_right;
-        let btn_horn = cx.local.btn_horn;
+        let btn_ind_left = &mut cx.local.input_buttons.btn_indicator_left;
+        let btn_ind_right = &mut cx.local.input_buttons.btn_indicator_right;
+        let btn_horn = &mut cx.local.input_buttons.btn_horn;
 
         if btn_ind_left.check_interrupt() {
             btn_ind_left.clear_interrupt_pending_bit();
@@ -412,10 +432,8 @@ mod app {
 
         if btn_ind_right.check_interrupt() {
             btn_ind_right.clear_interrupt_pending_bit();
-            button_indicator_right_handler::spawn(
-                btn_ind_right.is_high(),
-            )
-            .unwrap();
+            button_indicator_right_handler::spawn(btn_ind_right.is_high())
+                .unwrap();
         }
 
         if btn_horn.check_interrupt() {
@@ -442,21 +460,22 @@ mod app {
         });
 
         cx.shared.can.lock(|can| {
-            let _ = can.transmit(&light_frame);
+            nb::block!(can.transmit(&light_frame)).unwrap();
         });
     }
 
-    #[task(priority = 2, shared = [input_left_indicator, left_indicator])]
-    fn toggle_left_indicator(mut cx: toggle_left_indicator::Context) {        
+    #[task(priority = 2, shared = [input_left_indicator, lcd_data])]
+    fn toggle_left_indicator(mut cx: toggle_left_indicator::Context) {
         cx.shared.input_left_indicator.lock(|l_input| {
-            cx.shared.left_indicator.lock(|l_ind| {
-                *l_ind = !*l_ind;
+            cx.shared.lcd_data.lock(|lcd_data| {
+                lcd_data.left_indicator = !lcd_data.left_indicator;
 
                 if *l_input {
-                    toggle_left_indicator::spawn_after(Duration::millis(500)).unwrap();
+                    toggle_left_indicator::spawn_after(Duration::millis(500))
+                        .unwrap();
                 } else {
                     // Ensure display character is cleared
-                    *l_ind = false;
+                    lcd_data.left_indicator = false;
                 }
             });
         });
@@ -480,21 +499,22 @@ mod app {
         });
 
         cx.shared.can.lock(|can| {
-            let _ = can.transmit(&light_frame);
+            nb::block!(can.transmit(&light_frame)).unwrap();
         });
     }
 
-    #[task(priority = 2, shared = [input_right_indicator, right_indicator])]
+    #[task(priority = 2, shared = [input_right_indicator, lcd_data])]
     fn toggle_right_indicator(mut cx: toggle_right_indicator::Context) {
         cx.shared.input_right_indicator.lock(|r_input| {
-            cx.shared.right_indicator.lock(|r_ind| {
-                *r_ind = !*r_ind;
+            cx.shared.lcd_data.lock(|lcd_data| {
+                lcd_data.right_indicator = !lcd_data.right_indicator;
 
                 if *r_input {
-                    toggle_right_indicator::spawn_after(Duration::millis(500)).unwrap();
+                    toggle_right_indicator::spawn_after(Duration::millis(500))
+                        .unwrap();
                 } else {
                     // Ensure display character is cleared
-                    *r_ind = false;
+                    lcd_data.right_indicator = false;
                 }
             });
         });
@@ -507,131 +527,149 @@ mod app {
     }
 
     /// Handle updating of speed
-    #[task(shared = [speed, battery, temperature, left_indicator, right_indicator, warnings], local=[lcd_disp])]
-    fn update_display(cx: update_display::Context) {
-        let speed = cx.shared.speed;
-        let battery = cx.shared.battery;
-        let temp = cx.shared.temperature;
-        let l_ind = cx.shared.left_indicator;
-        let r_ind = cx.shared.right_indicator;
-        let warns = cx.shared.warnings;
-       
+    #[task(shared = [lcd_data], local=[lcd_disp])]
+    fn update_display(mut cx: update_display::Context) {
+        let lcd_disp = cx.local.lcd_disp;
 
-        let lcd = cx.local.lcd_disp;
-
-        (speed, battery, temp, l_ind, r_ind, warns).lock(|speed, battery, temp, l_ind, r_ind, warns| {
+        cx.shared.lcd_data.lock(|lcd_data| {
             // Display look should as following
             // |L_100_100_100_R|
             // |    ABCDEFG    |
             // Start by clearing everything
-            lcd.clear_display();
+            let speed = lcd_data.speed;
+            let battery = lcd_data.battery;
+            let temp = lcd_data.temperature;
+            let l_ind = lcd_data.left_indicator;
+            let r_ind = lcd_data.right_indicator;
+            let warnings = lcd_data.warnings;
+
+            lcd_disp.clear_display();
             // Set indicator status
-            if *l_ind {
-                lcd.set_position(0, 0);
-                lcd.send_string("L");
+            if l_ind {
+                lcd_disp.set_position(0, 0);
+                lcd_disp.send_string("L");
             }
 
-            if *r_ind {
-                lcd.set_position(15, 0);
-                lcd.send_string("R");
+            if r_ind {
+                lcd_disp.set_position(15, 0);
+                lcd_disp.send_string("R");
             }
 
-            let mut data_buf = [0; 3];
+            let mut data_buf = [0; 32];
 
             let vehicle_data = battery.numtoa_str(10, &mut data_buf);
 
-            lcd.set_position(2, 0);
-            lcd.send_string(vehicle_data);
+            lcd_disp.set_position(2, 0);
+            lcd_disp.send_string(vehicle_data);
 
             let vehicle_data = speed.numtoa_str(10, &mut data_buf);
 
-            lcd.set_position(6, 0);
-            lcd.send_string(vehicle_data);
+            lcd_disp.set_position(6, 0);
+            lcd_disp.send_string(vehicle_data);
 
             let vehicle_data = temp.numtoa_str(10, &mut data_buf);
 
-            lcd.set_position(10, 0);
-            lcd.send_string(vehicle_data);
-            
+            lcd_disp.set_position(10, 0);
+            lcd_disp.send_string(vehicle_data);
+
             // Warnings
-            for i in 0..warns.len() {
-                lcd.set_position((4 + i).try_into().unwrap(), 1);
-                if warns[i] == 1 {
-                    lcd.send_data(WARNING_CODES.chars().nth(i).unwrap().try_into().unwrap());
+            for i in 0..warnings.len() {
+                lcd_disp.set_position((4 + i).try_into().unwrap(), 1);
+                if warnings[i] == 1 {
+                    lcd_disp.send_data(
+                        WARNING_CODES
+                            .chars()
+                            .nth(i)
+                            .unwrap()
+                            .try_into()
+                            .unwrap(),
+                    );
                 } else {
-                    lcd.send_string("_");
+                    lcd_disp.send_string("_");
                 }
             }
 
-            update_display::spawn_after(Duration::millis(10)).unwrap();
-
+            update_display::spawn_after(Duration::millis(100)).unwrap();
         });
     }
 
-    /// Triggers on RX mailbox event.
-    #[task(priority = 1, shared = [can], binds = CAN1_RX0)]
-    fn can_rx0_pending(_: can_rx0_pending::Context) {
+    /// RX 0 interrupt pending handler.
+    #[task(priority = 2, shared = [can], binds = CAN1_RX0)]
+    fn can_rx0_pending(mut cx: can_rx0_pending::Context) {
         defmt::trace!("task: can rx0 pending");
 
-        can_receive::spawn().unwrap();
+        cx.shared.can.lock(|can| match can.receive() {
+            Ok(frame) => can_receive::spawn(frame).unwrap(),
+            _ => {}
+        })
     }
 
-    /// Triggers on RX mailbox event.
-    #[task(priority = 1, shared = [can], binds = CAN1_RX1)]
-    fn can_rx1_pending(_: can_rx1_pending::Context) {
+    /// RX 1 interrupt pending handler.
+    #[task(priority = 2, shared = [can], binds = CAN1_RX1)]
+    fn can_rx1_pending(mut cx: can_rx1_pending::Context) {
         defmt::trace!("task: can rx1 pending");
 
-        can_receive::spawn().unwrap();
+        cx.shared.can.lock(|can| match can.receive() {
+            Ok(frame) => can_receive::spawn(frame).unwrap(),
+            _ => {}
+        })
     }
 
-    #[task(priority = 2, shared = [can, speed, battery, temperature, left_indicator, right_indicator, warnings])]
-    fn can_receive(mut cx: can_receive::Context) {
-        defmt::trace!("task: can receive");
+    #[task(priority = 1, shared = [lcd_data], capacity=100)]
+    fn can_receive(mut cx: can_receive::Context, frame: Frame) {
+        // defmt::trace!("task: can receive");
+        let id = match frame.id() {
+            Id::Standard(id) => {
+                defmt::debug!("STD FRAME: {:?} {:?}", id.as_raw(), frame);
 
-        cx.shared.can.lock(|can| loop {
-            let frame = match can.receive() {
-                Ok(frame) => frame,
-                Err(nb::Error::WouldBlock) => break, // done
-                Err(nb::Error::Other(_)) => continue, // go to next frame
-            };
-
-            let id = match frame.id() {
-                Id::Standard(_) => {
-                    continue; // go to next frame
+                match id.as_raw() {
+                    0x7BB => {
+                        if let Some(data) = frame.data() {
+                            if let Ok(batt_data) = data[0..4].try_into() {
+                                cx.shared.lcd_data.lock(|lcd_data| {
+                                    lcd_data.battery =
+                                        u32::from_le_bytes(batt_data);
+                                });
+                            }
+                        }
+                    },
+                    _ => {}
                 }
-                Id::Extended(id) => id,
-            };
+                return;
+            }
+            Id::Extended(id) => id,
+        };
 
-            let id: j1939::ExtendedId = id.into();
+        let id: j1939::ExtendedId = id.into();
 
+        defmt::debug!("EXT FRAME: {:?} {:?}", id.to_bits(), frame);
+
+        cx.shared.lcd_data.lock(|lcd_data| {
             match id.pgn {
                 Pgn::Destination(pgn) => match pgn {
                     com::wavesculptor::PGN_BATTERY_MESSAGE => {
-                        cx.shared.battery.lock(|battery| {
-                            if let Some(data) = frame.data() {
-                                if let Ok(batt_data) = data[..].try_into() {
-                                    *battery = u8::from_le_bytes(batt_data);
-                                }
+                        if let Some(data) = frame.data() {
+                            if let Ok(batt_data) = data[0..4].try_into() {
+                                lcd_data.battery =
+                                    u32::from_le_bytes(batt_data);
                             }
-                        });
+                        }
                     },
                     com::wavesculptor::PGN_SPEED_MESSAGE => {
-                        cx.shared.speed.lock(|speed| {
-                            if let Some(data) = frame.data() {
-                                if let Ok(speed_data) = data[..].try_into() {
-                                    *speed = u8::from_le_bytes(speed_data);
-                                }
+                        if let Some(data) = frame.data() {
+                            if let Ok(speed_data) = data[0..4].try_into() {
+                                lcd_data.speed =
+                                    u32::from_le_bytes(speed_data);
                             }
-                        });
+                        }
                     },
                     com::wavesculptor::PGN_TEMPERATURE_MESSAGE => {
-                        cx.shared.temperature.lock(|temp| {
-                            if let Some(data) = frame.data() {
-                                if let Ok(temp_data) = data[..].try_into() {
-                                    *temp = u8::from_le_bytes(temp_data);
-                                }
+                        if let Some(data) = frame.data() {
+                            if let Ok(temp_data) = data[0..4].try_into() {
+                                lcd_data.temperature =
+                                    u32::from_le_bytes(temp_data);
                             }
-                        });
+                        }
                     },
                     _ => {
                         defmt::debug!("whut happun")
@@ -642,14 +680,14 @@ mod app {
         });
     }
 
-    #[idle]
-    fn idle(_: idle::Context) -> ! {
-        defmt::trace!("task: idle");
+    // #[idle]
+    // fn idle(_: idle::Context) -> ! {
+    //     defmt::trace!("task: idle");
 
-        loop {
-            cortex_m::asm::nop();
-        }
-    }
+    //     loop {
+    //         cortex_m::asm::nop();
+    //     }
+    // }
 }
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message

@@ -64,6 +64,7 @@ checksum = "4b13b4b2ea9ab2ba924063ebb86ad895cb79f4a79bf90f27949eb20c335b30f9"
 dependencies = [
  "bitflags",
  "defmt",
+ "embedded-can",
  "nb 1.1.0",
  "vcell",
 ]
@@ -211,14 +212,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "elmar-mppt"
-version = "0.1.1"
+name = "embedded-can"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1710cfebccd55fc8459095ff299115c14db600e537f4a3a14cd9e2272a8f99d4"
+checksum = "12719661dce6080d174aa0a9df1f61756022dc105c1761bcd37091a0ee5de635"
 dependencies = [
- "bitflags",
- "bxcan",
- "defmt",
+ "nb 1.1.0",
 ]
 
 [[package]]
@@ -522,7 +521,6 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 name = "steering-wheel"
 version = "0.1.0"
 dependencies = [
- "bitflags",
  "bxcan",
  "cortex-m",
  "cortex-m-rt",
@@ -530,9 +528,6 @@ dependencies = [
  "defmt",
  "defmt-rtt",
  "dwt-systick-monotonic",
- "elmar-mppt",
- "embedded-hal",
- "heapless",
  "nb 1.1.0",
  "numtoa",
  "panic-probe",
