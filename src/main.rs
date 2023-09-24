@@ -79,19 +79,13 @@ mod lcd;
 
 use lcd::LCD;
 
-pub enum DriverModes {
-    Drive,
-    Neutral,
-    Reverse
-}
-
 pub struct LcdData {
-    speed: u32,
-    battery: u32,
-    temperature: u32,
+    speed: f32,
+    battery: f32,
+    temperature: f32,
     left_indicator: bool, // What shows on the LCD screen, meant to be toggled while input is true
     right_indicator: bool,
-    mode: DriverModes, // Drive, Neutral, or Reverse
+    mode: com::wavesculptor::DriverModes, // Drive, Neutral, or Reverse
     cruise: bool, 
     warnings: [u8; 6],
 }
@@ -100,6 +94,10 @@ pub struct InputButtons {
     btn_indicator_left: PC6<Input<PullUp>>,
     btn_indicator_right: PC7<Input<PullUp>>, // TODO figure out which pins
     btn_horn: PA14<Input<PullUp>>,
+    btn_drive: PC8<Input<PullUp>>,
+    btn_neutral: PC9<Input<PullUp>>,
+    btn_reverse: PC10<Input<PullUp>>,
+    btn_cruise: PC11<Input<PullUp>>,
 }
 
 const DEVICE: device::Device = device::Device::SteeringWheel;
@@ -288,6 +286,10 @@ mod app {
             btn_indicator_left,
             btn_indicator_right,
             btn_horn,
+            btn_drive,
+            btn_neutral,
+            btn_reverse,
+            btn_cruise,
         };
 
         let mut lcd_disp = {
@@ -367,13 +369,13 @@ mod app {
         };
 
         let lcd_data = LcdData {
-            speed: 100,
-            battery: 12,
-            temperature: 65,
+            speed: 100f32,
+            battery: 12f32,
+            temperature: 65f32,
             left_indicator: false,
             right_indicator: false,
-            mode: DriverModes::Neutral,
-            cruise: false,
+            mode: com::wavesculptor::DriverModes::Neutral,
+            cruise: false, // torque mode by default
             warnings: [0, 0, 0, 0, 0, 0],
         };
 
@@ -433,6 +435,10 @@ mod app {
         let btn_ind_left = &mut cx.local.input_buttons.btn_indicator_left;
         let btn_ind_right = &mut cx.local.input_buttons.btn_indicator_right;
         let btn_horn = &mut cx.local.input_buttons.btn_horn;
+        let btn_drive = &mut cx.local.input_buttons.btn_drive;
+        let btn_neutral = &mut cx.local.input_buttons.btn_neutral;
+        let btn_reverse = &mut cx.local.input_buttons.btn_reverse;
+        let btn_cruise = &mut cx.local.input_buttons.btn_cruise;
 
         if btn_ind_left.check_interrupt() {
             btn_ind_left.clear_interrupt_pending_bit();
@@ -446,9 +452,31 @@ mod app {
                 .unwrap();
         }
 
+        // TODO these should each send a CAN frame that handles the functionality
         if btn_horn.check_interrupt() {
             btn_horn.clear_interrupt_pending_bit();
-            button_horn_handler::spawn(btn_horn.is_high()).unwrap();
+            let frame = com::horn::horn_message(DEVICE, btn_horn.is_high() as u8);
+            button_send_frame_handler::spawn(frame).unwrap();
+        }
+        
+        if btn_drive.check_interrupt() {
+            btn_drive.clear_interrupt_pending_bit();
+            // button_horn_handler::spawn(btn_drive.is_high()).unwrap();
+        }
+
+        if btn_neutral.check_interrupt() {
+            btn_neutral.clear_interrupt_pending_bit();
+            // button_horn_handler::spawn(btn_neutral.is_high()).unwrap();
+        }
+
+        if btn_reverse.check_interrupt() {
+            btn_reverse.clear_interrupt_pending_bit();
+            // button_horn_handler::spawn(btn_reverse.is_high()).unwrap();
+        }
+
+        if btn_cruise.check_interrupt() {
+            btn_cruise.clear_interrupt_pending_bit();
+            button_cruise_toggle_handler::spawn().unwrap();
         }
     }
 
@@ -471,6 +499,16 @@ mod app {
 
         cx.shared.can.lock(|can| {
             nb::block!(can.transmit(&light_frame)).unwrap();
+        });
+    }
+
+    #[task(priority = 2, shared = [lcd_data])]
+    fn button_cruise_toggle_handler(mut cx: button_cruise_toggle_handler::Context) {
+        cx.shared.lcd_data.lock(|lcd_data| {
+            lcd_data.cruise = !lcd_data.cruise;
+            let mode = com::wavesculptor::ControlTypes::from(lcd_data.cruise as u8);
+            let frame = com::wavesculptor::control_type_message(DEVICE, mode);
+            button_send_frame_handler::spawn(frame).unwrap();
         });
     }
 
@@ -530,10 +568,11 @@ mod app {
         });
     }
 
-    /// Handle horn button state change
     #[task(priority = 2, shared = [can])]
-    fn button_horn_handler(mut cx: button_horn_handler::Context, state: bool) {
-        cx.shared.can.lock(|can| {});
+    fn button_send_frame_handler(mut cx: button_send_frame_handler::Context, frame: Frame) {
+        cx.shared.can.lock(|can| {
+            nb::block!(can.transmit(&frame)).unwrap();
+        });
     }
 
     /// Handle updating of speed
@@ -572,17 +611,17 @@ mod app {
 
             let mut data_buf = [0; 32];
 
-            let vehicle_data = battery.numtoa_str(10, &mut data_buf);
+            let vehicle_data = (battery as i32).numtoa_str(10, &mut data_buf);
 
             lcd_disp.set_position(2, 0);
             lcd_disp.send_string(vehicle_data);
 
-            let vehicle_data = speed.numtoa_str(10, &mut data_buf);
+            let vehicle_data = (speed as i32).numtoa_str(10, &mut data_buf);
 
             lcd_disp.set_position(6, 0);
             lcd_disp.send_string(vehicle_data);
 
-            let vehicle_data = temp.numtoa_str(10, &mut data_buf);
+            let vehicle_data = (temp as i32).numtoa_str(10, &mut data_buf);
 
             lcd_disp.set_position(10, 0);
             lcd_disp.send_string(vehicle_data);
@@ -613,9 +652,9 @@ mod app {
             // Driver mode
             lcd_disp.set_position(15, 1);
             match mode {
-                DriverModes::Drive => lcd_disp.send_string("D"),
-                DriverModes::Neutral => lcd_disp.send_string("N"),
-                DriverModes::Reverse => lcd_disp.send_string("R"),
+                com::wavesculptor::DriverModes::Drive => lcd_disp.send_string("D"),
+                com::wavesculptor::DriverModes::Neutral => lcd_disp.send_string("N"),
+                com::wavesculptor::DriverModes::Reverse => lcd_disp.send_string("R"),
             }
 
             update_display::spawn_after(Duration::millis(100)).unwrap();
@@ -650,20 +689,6 @@ mod app {
         let id = match frame.id() {
             Id::Standard(id) => {
                 defmt::debug!("STD FRAME: {:?} {:?}", id.as_raw(), frame);
-
-                match id.as_raw() {
-                    0x7BB => {
-                        if let Some(data) = frame.data() {
-                            if let Ok(batt_data) = data[0..4].try_into() {
-                                cx.shared.lcd_data.lock(|lcd_data| {
-                                    lcd_data.battery =
-                                        u32::from_le_bytes(batt_data);
-                                });
-                            }
-                        }
-                    },
-                    _ => {}
-                }
                 return;
             }
             Id::Extended(id) => id,
@@ -680,7 +705,7 @@ mod app {
                         if let Some(data) = frame.data() {
                             if let Ok(batt_data) = data[0..4].try_into() {
                                 lcd_data.battery =
-                                    u32::from_le_bytes(batt_data);
+                                    f32::from_le_bytes(batt_data);
                             }
                         }
                     },
@@ -688,7 +713,7 @@ mod app {
                         if let Some(data) = frame.data() {
                             if let Ok(speed_data) = data[0..4].try_into() {
                                 lcd_data.speed =
-                                    u32::from_le_bytes(speed_data);
+                                    f32::from_le_bytes(speed_data);
                             }
                         }
                     },
@@ -696,7 +721,7 @@ mod app {
                         if let Some(data) = frame.data() {
                             if let Ok(temp_data) = data[0..4].try_into() {
                                 lcd_data.temperature =
-                                    u32::from_le_bytes(temp_data);
+                                    f32::from_le_bytes(temp_data);
                             }
                         }
                     },
