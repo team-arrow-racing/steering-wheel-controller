@@ -21,7 +21,14 @@ use panic_probe as _;
 
 use dwt_systick_monotonic::{fugit, DwtSystick};
 use solar_car::{
-    com, device, j1939,
+    com::{self, 
+        wavesculptor::{
+            self,
+            DriverModes,
+            ControlTypes
+        }}, 
+    device, 
+    j1939,
     j1939::pgn::{Number, Pgn},
 };
 
@@ -374,7 +381,7 @@ mod app {
             temperature: 65f32,
             left_indicator: false,
             right_indicator: false,
-            mode: com::wavesculptor::DriverModes::Neutral,
+            mode: DriverModes::Neutral,
             cruise: false, // torque mode by default
             warnings: [0, 0, 0, 0, 0, 0],
         };
@@ -452,7 +459,6 @@ mod app {
                 .unwrap();
         }
 
-        // TODO these should each send a CAN frame that handles the functionality
         if btn_horn.check_interrupt() {
             btn_horn.clear_interrupt_pending_bit();
             let frame = com::horn::horn_message(DEVICE, btn_horn.is_high() as u8);
@@ -461,17 +467,23 @@ mod app {
         
         if btn_drive.check_interrupt() {
             btn_drive.clear_interrupt_pending_bit();
-            // button_horn_handler::spawn(btn_drive.is_high()).unwrap();
+            if btn_drive.is_high() {
+                button_driver_mode_handler::spawn(DriverModes::Drive).unwrap();
+            }
         }
 
         if btn_neutral.check_interrupt() {
             btn_neutral.clear_interrupt_pending_bit();
-            // button_horn_handler::spawn(btn_neutral.is_high()).unwrap();
+            if btn_neutral.is_high() {
+                button_driver_mode_handler::spawn(DriverModes::Neutral).unwrap();
+            }
         }
 
         if btn_reverse.check_interrupt() {
             btn_reverse.clear_interrupt_pending_bit();
-            // button_horn_handler::spawn(btn_reverse.is_high()).unwrap();
+            if btn_reverse.is_high() {
+                button_driver_mode_handler::spawn(DriverModes::Reverse).unwrap();
+            }
         }
 
         if btn_cruise.check_interrupt() {
@@ -502,17 +514,26 @@ mod app {
         });
     }
 
-    #[task(priority = 2, shared = [lcd_data])]
-    fn button_cruise_toggle_handler(mut cx: button_cruise_toggle_handler::Context) {
+    #[task(priority = 1, shared = [lcd_data])]
+    fn button_driver_mode_handler(mut cx: button_driver_mode_handler::Context, mode: DriverModes) {
         cx.shared.lcd_data.lock(|lcd_data| {
-            lcd_data.cruise = !lcd_data.cruise;
-            let mode = com::wavesculptor::ControlTypes::from(lcd_data.cruise as u8);
-            let frame = com::wavesculptor::control_type_message(DEVICE, mode);
+            lcd_data.mode = mode;
+            let frame = wavesculptor::driver_mode_message(DEVICE, mode);
             button_send_frame_handler::spawn(frame).unwrap();
         });
     }
 
-    #[task(priority = 2, shared = [input_left_indicator, lcd_data])]
+    #[task(priority = 1, shared = [lcd_data])]
+    fn button_cruise_toggle_handler(mut cx: button_cruise_toggle_handler::Context) {
+        cx.shared.lcd_data.lock(|lcd_data| {
+            lcd_data.cruise = !lcd_data.cruise;
+            let mode = ControlTypes::from(lcd_data.cruise as u8);
+            let frame = wavesculptor::control_type_message(DEVICE, mode);
+            button_send_frame_handler::spawn(frame).unwrap();
+        });
+    }
+
+    #[task(priority = 1, shared = [input_left_indicator, lcd_data])]
     fn toggle_left_indicator(mut cx: toggle_left_indicator::Context) {
         cx.shared.input_left_indicator.lock(|l_input| {
             cx.shared.lcd_data.lock(|lcd_data| {
@@ -530,7 +551,7 @@ mod app {
     }
 
     /// Handle right indicator button state change
-    #[task(priority = 2, shared = [can, input_right_indicator])]
+    #[task(priority = 1, shared = [can, input_right_indicator])]
     fn button_indicator_right_handler(
         mut cx: button_indicator_right_handler::Context,
         state: bool,
@@ -551,7 +572,7 @@ mod app {
         });
     }
 
-    #[task(priority = 2, shared = [input_right_indicator, lcd_data])]
+    #[task(priority = 1, shared = [input_right_indicator, lcd_data])]
     fn toggle_right_indicator(mut cx: toggle_right_indicator::Context) {
         cx.shared.input_right_indicator.lock(|r_input| {
             cx.shared.lcd_data.lock(|lcd_data| {
@@ -568,7 +589,7 @@ mod app {
         });
     }
 
-    #[task(priority = 2, shared = [can])]
+    #[task(priority = 1, shared = [can])]
     fn button_send_frame_handler(mut cx: button_send_frame_handler::Context, frame: Frame) {
         cx.shared.can.lock(|can| {
             nb::block!(can.transmit(&frame)).unwrap();
@@ -652,9 +673,9 @@ mod app {
             // Driver mode
             lcd_disp.set_position(15, 1);
             match mode {
-                com::wavesculptor::DriverModes::Drive => lcd_disp.send_string("D"),
-                com::wavesculptor::DriverModes::Neutral => lcd_disp.send_string("N"),
-                com::wavesculptor::DriverModes::Reverse => lcd_disp.send_string("R"),
+                DriverModes::Drive => lcd_disp.send_string("D"),
+                DriverModes::Neutral => lcd_disp.send_string("N"),
+                DriverModes::Reverse => lcd_disp.send_string("R"),
             }
 
             update_display::spawn_after(Duration::millis(100)).unwrap();
@@ -701,7 +722,7 @@ mod app {
         cx.shared.lcd_data.lock(|lcd_data| {
             match id.pgn {
                 Pgn::Destination(pgn) => match pgn {
-                    com::wavesculptor::PGN_BATTERY_MESSAGE => {
+                    wavesculptor::PGN_BATTERY_MESSAGE => {
                         if let Some(data) = frame.data() {
                             if let Ok(batt_data) = data[0..4].try_into() {
                                 lcd_data.battery =
@@ -709,7 +730,7 @@ mod app {
                             }
                         }
                     },
-                    com::wavesculptor::PGN_SPEED_MESSAGE => {
+                    wavesculptor::PGN_SPEED_MESSAGE => {
                         if let Some(data) = frame.data() {
                             if let Ok(speed_data) = data[0..4].try_into() {
                                 lcd_data.speed =
@@ -717,7 +738,7 @@ mod app {
                             }
                         }
                     },
-                    com::wavesculptor::PGN_TEMPERATURE_MESSAGE => {
+                    wavesculptor::PGN_TEMPERATURE_MESSAGE => {
                         if let Some(data) = frame.data() {
                             if let Ok(temp_data) = data[0..4].try_into() {
                                 lcd_data.temperature =
