@@ -25,7 +25,6 @@ use solar_car::{
         wavesculptor::{
             self,
             DriverModes,
-            ControlTypes
         }}, 
     device, 
     j1939,
@@ -92,7 +91,7 @@ pub struct LcdData {
     temperature: f32,
     left_indicator: bool, // What shows on the LCD screen, meant to be toggled while input is true
     right_indicator: bool,
-    mode: com::wavesculptor::DriverModes, // Drive, Neutral, or Reverse
+    mode: DriverModes, // Drive, Neutral, or Reverse
     cruise: bool, 
     warnings: [u8; 6],
 }
@@ -527,8 +526,7 @@ mod app {
     fn button_cruise_toggle_handler(mut cx: button_cruise_toggle_handler::Context) {
         cx.shared.lcd_data.lock(|lcd_data| {
             lcd_data.cruise = !lcd_data.cruise;
-            let mode = ControlTypes::from(lcd_data.cruise as u8);
-            let frame = wavesculptor::control_type_message(DEVICE, mode);
+            let frame = wavesculptor::control_type_message(DEVICE, lcd_data.cruise);
             button_send_frame_handler::spawn(frame).unwrap();
         });
     }
