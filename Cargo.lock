@@ -494,7 +494,6 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 [[package]]
 name = "solar-car"
 version = "0.1.1"
-source = "git+https://github.com/team-arrow-racing/solar-car-common#c4482219001d8427a52393353eb638fc1430c6a1"
 dependencies = [
  "bitflags",
  "bxcan",
@@ -534,6 +533,7 @@ dependencies = [
  "panic-probe",
  "solar-car",
  "stm32l4xx-hal",
+ "timed-debouncer",
 ]
 
 [[package]]
@@ -614,6 +614,12 @@ dependencies = [
  "quote",
  "syn 2.0.29",
 ]
+
+[[package]]
+name = "timed-debouncer"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5daefa3de30509898570eefb2bd1643f3038b9f16a56c0c7d95ffe1c654c8f52"
 
 [[package]]
 name = "unicode-ident"

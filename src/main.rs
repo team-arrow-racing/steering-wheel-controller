@@ -19,6 +19,7 @@
 use defmt_rtt as _;
 use panic_probe as _;
 
+use timed_debouncer::Debouncer;
 use dwt_systick_monotonic::{fugit, DwtSystick};
 use solar_car::{
     com::{self, 
@@ -35,11 +36,13 @@ use bxcan::{filter::Mask32, Frame, Id, Interrupts, StandardId};
 use numtoa::NumToA;
 
 use stm32l4xx_hal::{
+    adc::{DmaMode, SampleTime, Sequence, ADC},
     can::Can,
     delay::DelayCM,
     device::CAN1,
     flash::FlashExt,
     gpio::{
+        Analog,
         Alternate,
         Edge,
         ExtiPin,
@@ -100,9 +103,6 @@ pub struct InputButtons {
     btn_indicator_left: PC6<Input<PullUp>>,
     btn_indicator_right: PC7<Input<PullUp>>, // TODO figure out which pins
     btn_horn: PA14<Input<PullUp>>,
-    btn_drive: PC8<Input<PullUp>>,
-    btn_neutral: PC9<Input<PullUp>>,
-    btn_reverse: PC10<Input<PullUp>>,
     btn_cruise: PC11<Input<PullUp>>,
 }
 
@@ -138,6 +138,8 @@ mod app {
         led_status: PB5<Output<PushPull>>,
         input_buttons: InputButtons,
         lcd_disp: LCD,
+        adc: ADC,
+        driver_pot: PA0<Analog>
     }
 
     #[init]
@@ -292,9 +294,6 @@ mod app {
             btn_indicator_left,
             btn_indicator_right,
             btn_horn,
-            btn_drive,
-            btn_neutral,
-            btn_reverse,
             btn_cruise,
         };
 
@@ -385,9 +384,21 @@ mod app {
             warnings: [0, 0, 0, 0, 0, 0],
         };
 
+        let mut delay = DelayCM::new(clocks);
+        let adc = ADC::new(
+            cx.device.ADC1,
+            cx.device.ADC_COMMON,
+            &mut rcc.ahb2,
+            &mut rcc.ccipr,
+            &mut delay,
+        );
+        let driver_pot =
+            gpioa.pa0.into_analog(&mut gpioa.moder, &mut gpioa.pupdr);
+
         run::spawn().unwrap();
         heartbeat::spawn_after(Duration::millis(500)).unwrap();
         update_display::spawn().unwrap();
+        read_driver_pot::spawn().unwrap();
 
         (
             Shared {
@@ -401,6 +412,8 @@ mod app {
                 led_status,
                 input_buttons,
                 lcd_disp,
+                adc,
+                driver_pot
             },
             init::Monotonics(mono),
         )
@@ -441,9 +454,6 @@ mod app {
         let btn_ind_left = &mut cx.local.input_buttons.btn_indicator_left;
         let btn_ind_right = &mut cx.local.input_buttons.btn_indicator_right;
         let btn_horn = &mut cx.local.input_buttons.btn_horn;
-        let btn_drive = &mut cx.local.input_buttons.btn_drive;
-        let btn_neutral = &mut cx.local.input_buttons.btn_neutral;
-        let btn_reverse = &mut cx.local.input_buttons.btn_reverse;
         let btn_cruise = &mut cx.local.input_buttons.btn_cruise;
 
         if btn_ind_left.check_interrupt() {
@@ -462,27 +472,6 @@ mod app {
             btn_horn.clear_interrupt_pending_bit();
             let frame = com::horn::horn_message(DEVICE, btn_horn.is_high() as u8);
             button_send_frame_handler::spawn(frame).unwrap();
-        }
-        
-        if btn_drive.check_interrupt() {
-            btn_drive.clear_interrupt_pending_bit();
-            if btn_drive.is_high() {
-                button_driver_mode_handler::spawn(DriverModes::Drive).unwrap();
-            }
-        }
-
-        if btn_neutral.check_interrupt() {
-            btn_neutral.clear_interrupt_pending_bit();
-            if btn_neutral.is_high() {
-                button_driver_mode_handler::spawn(DriverModes::Neutral).unwrap();
-            }
-        }
-
-        if btn_reverse.check_interrupt() {
-            btn_reverse.clear_interrupt_pending_bit();
-            if btn_reverse.is_high() {
-                button_driver_mode_handler::spawn(DriverModes::Reverse).unwrap();
-            }
         }
 
         if btn_cruise.check_interrupt() {
@@ -592,6 +581,22 @@ mod app {
         cx.shared.can.lock(|can| {
             nb::block!(can.transmit(&frame)).unwrap();
         });
+    }
+
+    #[task(shared = [lcd_data], local = [adc, driver_pot])]
+    fn read_driver_pot(mut cx: read_driver_pot::Context) {
+        let mut debouncer = Debouncer::new();
+        let mut adc_val = cx.local.adc.read(cx.local.driver_pot).unwrap();
+        adc_val = debouncer.update(adc_val, monotonics::MonoTimer::now().ticks(), 800);
+        
+        let new_mode = DriverModes::from((adc_val / 1000) as u8);
+        cx.shared.lcd_data.lock(|lcd_data| {
+            if new_mode != lcd_data.mode {
+                button_driver_mode_handler::spawn(new_mode).unwrap();
+            }
+        });
+
+        read_driver_pot::spawn_after(Duration::millis(100)).unwrap();
     }
 
     /// Handle updating of speed
