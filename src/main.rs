@@ -99,9 +99,12 @@ pub struct LcdData {
     warnings: [u8; 6],
 }
 
-pub struct InputButtons {
+pub struct InputButtons9_5 {
     btn_indicator_left: PC6<Input<PullUp>>,
     btn_indicator_right: PC7<Input<PullUp>>, // TODO figure out which pins
+}
+
+pub struct InputButtons15_10 {
     btn_horn: PA14<Input<PullUp>>,
     btn_cruise: PC11<Input<PullUp>>,
 }
@@ -136,7 +139,8 @@ mod app {
     struct Local {
         watchdog: IndependentWatchdog,
         led_status: PB5<Output<PushPull>>,
-        input_buttons: InputButtons,
+        input_buttons_9_5: InputButtons9_5,
+        input_buttons_15_10: InputButtons15_10,
         lcd_disp: LCD,
         adc: ADC,
         driver_pot: PA0<Analog>
@@ -219,56 +223,7 @@ mod app {
             btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
 
             unsafe {
-                NVIC::unmask(Interrupt::EXTI9_5);
-            }
-
-            btn
-        };
-
-        // TODO figure out which buttons are which pins
-        let btn_drive = {
-            let mut btn = gpioc
-                .pc8
-                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
-
-            btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
-            btn.enable_interrupt(&mut cx.device.EXTI);
-            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
-
-            unsafe {
-                NVIC::unmask(Interrupt::EXTI9_5);
-            }
-
-            btn
-        };
-
-        let btn_neutral = {
-            let mut btn = gpioc
-                .pc9
-                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
-
-            btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
-            btn.enable_interrupt(&mut cx.device.EXTI);
-            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
-
-            unsafe {
-                NVIC::unmask(Interrupt::EXTI9_5);
-            }
-
-            btn
-        };
-
-        let btn_reverse = {
-            let mut btn = gpioc
-                .pc10
-                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
-
-            btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
-            btn.enable_interrupt(&mut cx.device.EXTI);
-            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
-
-            unsafe {
-                NVIC::unmask(Interrupt::EXTI9_5);
+                NVIC::unmask(Interrupt::EXTI15_10);
             }
 
             btn
@@ -284,15 +239,18 @@ mod app {
             btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
 
             unsafe {
-                NVIC::unmask(Interrupt::EXTI9_5);
+                NVIC::unmask(Interrupt::EXTI15_10);
             }
 
             btn
         };
 
-        let input_buttons = InputButtons {
+        let input_buttons_9_5 = InputButtons9_5 {
             btn_indicator_left,
-            btn_indicator_right,
+            btn_indicator_right
+        };
+
+        let input_buttons_15_10 = InputButtons15_10 {
             btn_horn,
             btn_cruise,
         };
@@ -410,7 +368,8 @@ mod app {
             Local {
                 watchdog,
                 led_status,
-                input_buttons,
+                input_buttons_9_5,
+                input_buttons_15_10,
                 lcd_disp,
                 adc,
                 driver_pot
@@ -447,14 +406,12 @@ mod app {
     }
 
     /// Triggers on interrupt event.
-    #[task(priority = 1, binds = EXTI9_5, local = [input_buttons])]
+    #[task(priority = 1, binds = EXTI9_5, local = [input_buttons_9_5])]
     fn exti9_5_pending(cx: exti9_5_pending::Context) {
         defmt::trace!("task: exti9_5 pending");
 
-        let btn_ind_left = &mut cx.local.input_buttons.btn_indicator_left;
-        let btn_ind_right = &mut cx.local.input_buttons.btn_indicator_right;
-        let btn_horn = &mut cx.local.input_buttons.btn_horn;
-        let btn_cruise = &mut cx.local.input_buttons.btn_cruise;
+        let btn_ind_left = &mut cx.local.input_buttons_9_5.btn_indicator_left;
+        let btn_ind_right = &mut cx.local.input_buttons_9_5.btn_indicator_right;
 
         if btn_ind_left.check_interrupt() {
             btn_ind_left.clear_interrupt_pending_bit();
@@ -467,6 +424,12 @@ mod app {
             button_indicator_right_handler::spawn(btn_ind_right.is_high())
                 .unwrap();
         }
+    }
+
+    #[task(priority = 1, binds = EXTI15_10, local = [input_buttons_15_10])]
+    fn exti15_10_pending(cx: exti15_10_pending::Context) {
+        let btn_horn = &mut cx.local.input_buttons_15_10.btn_horn;
+        let btn_cruise = &mut cx.local.input_buttons_15_10.btn_cruise;
 
         if btn_horn.check_interrupt() {
             btn_horn.clear_interrupt_pending_bit();
