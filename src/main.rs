@@ -97,6 +97,7 @@ pub struct LcdData {
     mode: DriverModes, // Drive, Neutral, or Reverse
     cruise: bool, 
     warnings: [u8; 6],
+    contactors: bool, // Contactors enabled or not
 }
 
 pub struct InputButtons9_5 {
@@ -143,7 +144,8 @@ mod app {
         input_buttons_15_10: InputButtons15_10,
         lcd_disp: LCD,
         adc: ADC,
-        driver_pot: PA0<Analog>
+        driver_pot: PA0<Analog>,
+        enable_contactor_switch: PC8<Input<PullUp>>
     }
 
     #[init]
@@ -245,6 +247,22 @@ mod app {
             btn
         };
 
+        let enable_contactor_switch = {
+            let mut btn = gpioc
+                .pc8
+                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
+
+            btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
+            btn.enable_interrupt(&mut cx.device.EXTI);
+            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::RisingFalling);
+
+            unsafe {
+                NVIC::unmask(Interrupt::EXTI9_5);
+            }
+
+            btn
+        };
+
         let input_buttons_9_5 = InputButtons9_5 {
             btn_indicator_left,
             btn_indicator_right
@@ -340,6 +358,7 @@ mod app {
             mode: DriverModes::Neutral,
             cruise: false, // torque mode by default
             warnings: [0, 0, 0, 0, 0, 0],
+            contactors: enable_contactor_switch.is_low(),
         };
 
         let mut delay = DelayCM::new(clocks);
@@ -372,7 +391,8 @@ mod app {
                 input_buttons_15_10,
                 lcd_disp,
                 adc,
-                driver_pot
+                driver_pot,
+                enable_contactor_switch
             },
             init::Monotonics(mono),
         )
@@ -406,12 +426,13 @@ mod app {
     }
 
     /// Triggers on interrupt event.
-    #[task(priority = 1, binds = EXTI9_5, local = [input_buttons_9_5])]
+    #[task(priority = 1, binds = EXTI9_5, local = [input_buttons_9_5, enable_contactor_switch])]
     fn exti9_5_pending(cx: exti9_5_pending::Context) {
         defmt::trace!("task: exti9_5 pending");
 
         let btn_ind_left = &mut cx.local.input_buttons_9_5.btn_indicator_left;
         let btn_ind_right = &mut cx.local.input_buttons_9_5.btn_indicator_right;
+        let enable_contactor_switch = cx.local.enable_contactor_switch;
 
         if btn_ind_left.check_interrupt() {
             btn_ind_left.clear_interrupt_pending_bit();
@@ -424,6 +445,20 @@ mod app {
             button_indicator_right_handler::spawn(btn_ind_right.is_high())
                 .unwrap();
         }
+
+        if enable_contactor_switch.check_interrupt() {
+            enable_contactor_switch.clear_interrupt_pending_bit();
+            toggle_contactors::spawn().unwrap();
+        }
+    }
+
+    #[task(priority = 2, shared = [lcd_data])]
+    fn toggle_contactors(mut cx: toggle_contactors::Context) {
+        cx.shared.lcd_data.lock(|lcd_data| {
+            lcd_data.contactors = !lcd_data.contactors;
+            let frame = com::array::enable_contactors_message(DEVICE, lcd_data.contactors);
+            send_can_frame::spawn(frame).unwrap();
+        });
     }
 
     #[task(priority = 1, binds = EXTI15_10, local = [input_buttons_15_10])]
@@ -434,7 +469,7 @@ mod app {
         if btn_horn.check_interrupt() {
             btn_horn.clear_interrupt_pending_bit();
             let frame = com::horn::horn_message(DEVICE, btn_horn.is_high() as u8);
-            button_send_frame_handler::spawn(frame).unwrap();
+            send_can_frame::spawn(frame).unwrap();
         }
 
         if btn_cruise.check_interrupt() {
@@ -470,7 +505,7 @@ mod app {
         cx.shared.lcd_data.lock(|lcd_data| {
             lcd_data.mode = mode;
             let frame = wavesculptor::driver_mode_message(DEVICE, mode);
-            button_send_frame_handler::spawn(frame).unwrap();
+            send_can_frame::spawn(frame).unwrap();
         });
     }
 
@@ -479,7 +514,7 @@ mod app {
         cx.shared.lcd_data.lock(|lcd_data| {
             lcd_data.cruise = !lcd_data.cruise;
             let frame = wavesculptor::control_type_message(DEVICE, lcd_data.cruise);
-            button_send_frame_handler::spawn(frame).unwrap();
+            send_can_frame::spawn(frame).unwrap();
         });
     }
 
@@ -540,7 +575,7 @@ mod app {
     }
 
     #[task(priority = 1, shared = [can])]
-    fn button_send_frame_handler(mut cx: button_send_frame_handler::Context, frame: Frame) {
+    fn send_can_frame(mut cx: send_can_frame::Context, frame: Frame) {
         cx.shared.can.lock(|can| {
             nb::block!(can.transmit(&frame)).unwrap();
         });
@@ -570,9 +605,9 @@ mod app {
         cx.shared.lcd_data.lock(|lcd_data| {
             // Display look should as following
             // |L_100_100_100_R|
-            // |C   ABCDEFG   M|
+            // |C E ABCDEFG   M|
             // Top row: <Left indicator> <battery> <speed> <temperature> <Right indicator>
-            // Bot row: <Cruise enabled> <Warnings> <Driver mode>
+            // Bot row: <Cruise enabled> <Contactors Engaged> <Warnings> <Driver mode>
             // Start by clearing everything
             let speed = lcd_data.speed;
             let battery = lcd_data.battery;
@@ -582,6 +617,7 @@ mod app {
             let warnings = lcd_data.warnings;
             let cruise = lcd_data.cruise;
             let mode = &lcd_data.mode;
+            let contactors = lcd_data.contactors;
 
             lcd_disp.clear_display();
             // TOP ROW
@@ -617,6 +653,11 @@ mod app {
             if cruise {
                 lcd_disp.set_position(0, 1);
                 lcd_disp.send_string("C");
+            }
+
+            if contactors {
+                lcd_disp.set_position(2, 1);
+                lcd_disp.send_string("E");
             }
 
             // Warnings
