@@ -222,7 +222,7 @@ mod app {
 
             btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
             btn.enable_interrupt(&mut cx.device.EXTI);
-            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
+            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::RisingFalling);
 
             unsafe {
                 NVIC::unmask(Interrupt::EXTI15_10);
@@ -463,6 +463,7 @@ mod app {
 
         if btn_horn.check_interrupt() {
             btn_horn.clear_interrupt_pending_bit();
+            defmt::debug!("horn pressed {}", btn_horn.is_high());
             let frame = com::horn::horn_message(DEVICE, btn_horn.is_high() as u8);
             send_can_frame::spawn(frame).unwrap();
         }
@@ -491,7 +492,8 @@ mod app {
         defmt::trace!("task: can send left indicator frame");
         let light_frame = com::lighting::message(
             DEVICE,
-            com::lighting::LampsState::INDICATOR_LEFT.bits(), // TODO AND this with the state var?
+            com::lighting::LampsState::INDICATOR_LEFT,
+            state as u8
         );
 
         cx.shared.input_left_indicator.lock(|l_input| {
@@ -544,10 +546,11 @@ mod app {
         mut cx: button_indicator_right_handler::Context,
         state: bool,
     ) {
-        defmt::trace!("task: can send left indicator frame");
+        defmt::trace!("task: can send right indicator frame");
         let light_frame = com::lighting::message(
             DEVICE,
-            com::lighting::LampsState::INDICATOR_RIGHT.bits(),
+            com::lighting::LampsState::INDICATOR_RIGHT,
+            state as u8
         );
 
         cx.shared.input_right_indicator.lock(|r_input| {
