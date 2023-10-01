@@ -49,13 +49,13 @@ use stm32l4xx_hal::{
         Input,
         Output,
         PullUp,
+        PullDown,
         PushPull,
         PA0,  // AI2
         PA1,  // AI1
         PA10, // DI7
         PA11, // CAN RX
         PA12, // CAN TX
-        PA14, // Horn btn (?)
         PA15, // DI8
         PA4,  // PWM6
         PA5,  // PWM5
@@ -67,13 +67,13 @@ use stm32l4xx_hal::{
         PB6,  // INPUT_PB
         PC0,  // PWM2
         PC1,  // PWM1
-        PC10, // DI9
-        PC11, // DI10
+        PC10, // DI9 Horn button
+        PC11, // DI10 Cruise button
         PC12, // DI11
         PC2,  // PWM4
         PC3,  // PWM3
-        PC6,  // DI1
-        PC7,  // DI2
+        PC6,  // DI1 INDICATOR LEFT
+        PC7,  // DI2 INDICATOR RIGHT
         PC8,  // DI3
         PC9,  // DI4
         PD2,  // DI12
@@ -101,12 +101,12 @@ pub struct LcdData {
 }
 
 pub struct InputButtons9_5 {
-    btn_indicator_left: PC6<Input<PullUp>>,
-    btn_indicator_right: PC7<Input<PullUp>>, // TODO figure out which pins
+    btn_indicator_left: PC6<Input<PullDown>>,
+    btn_indicator_right: PC7<Input<PullDown>>, // TODO figure out which pins
 }
 
 pub struct InputButtons15_10 {
-    btn_horn: PA14<Input<PullUp>>,
+    btn_horn: PC10<Input<PullUp>>,
     btn_cruise: PC11<Input<PullUp>>,
 }
 
@@ -186,11 +186,11 @@ mod app {
         let btn_indicator_left = {
             let mut btn = gpioc
                 .pc6
-                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
+                .into_pull_down_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
             btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
             btn.enable_interrupt(&mut cx.device.EXTI);
-            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
+            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::RisingFalling);
 
             unsafe {
                 NVIC::unmask(Interrupt::EXTI9_5);
@@ -202,11 +202,11 @@ mod app {
         let btn_indicator_right = {
             let mut btn = gpioc
                 .pc7
-                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
+                .into_pull_down_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
             btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
             btn.enable_interrupt(&mut cx.device.EXTI);
-            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::Falling);
+            btn.trigger_on_edge(&mut cx.device.EXTI, Edge::RisingFalling);
 
             unsafe {
                 NVIC::unmask(Interrupt::EXTI9_5);
@@ -216,9 +216,9 @@ mod app {
         };
 
         let btn_horn = {
-            let mut btn = gpioa
-                .pa14
-                .into_pull_up_input(&mut gpioa.moder, &mut gpioa.pupdr);
+            let mut btn = gpioc
+                .pc10
+                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
             btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
             btn.enable_interrupt(&mut cx.device.EXTI);
@@ -376,13 +376,15 @@ mod app {
         heartbeat::spawn_after(Duration::millis(500)).unwrap();
         update_display::spawn().unwrap();
         read_driver_pot::spawn().unwrap();
+        toggle_left_indicator::spawn().unwrap();
+        toggle_right_indicator::spawn().unwrap();
 
         (
             Shared {
                 can,
                 lcd_data,
-                input_left_indicator: false,
-                input_right_indicator: false,
+                input_left_indicator: input_buttons_9_5.btn_indicator_left.is_high(),
+                input_right_indicator: input_buttons_9_5.btn_indicator_right.is_high(),
             },
             Local {
                 watchdog,
@@ -426,7 +428,7 @@ mod app {
     }
 
     /// Triggers on interrupt event.
-    #[task(priority = 1, binds = EXTI9_5, local = [input_buttons_9_5, enable_contactor_switch])]
+    #[task(priority = 2, binds = EXTI9_5, local = [input_buttons_9_5, enable_contactor_switch])]
     fn exti9_5_pending(cx: exti9_5_pending::Context) {
         defmt::trace!("task: exti9_5 pending");
 
@@ -435,12 +437,14 @@ mod app {
         let enable_contactor_switch = cx.local.enable_contactor_switch;
 
         if btn_ind_left.check_interrupt() {
+            defmt::debug!("left ind {}", btn_ind_left.is_high());
             btn_ind_left.clear_interrupt_pending_bit();
             button_indicator_left_handler::spawn(btn_ind_left.is_high())
                 .unwrap();
         }
 
         if btn_ind_right.check_interrupt() {
+            defmt::debug!("right ind {}", btn_ind_right.is_high());
             btn_ind_right.clear_interrupt_pending_bit();
             button_indicator_right_handler::spawn(btn_ind_right.is_high())
                 .unwrap();
@@ -452,16 +456,7 @@ mod app {
         }
     }
 
-    #[task(priority = 2, shared = [lcd_data])]
-    fn toggle_contactors(mut cx: toggle_contactors::Context) {
-        cx.shared.lcd_data.lock(|lcd_data| {
-            lcd_data.contactors = !lcd_data.contactors;
-            let frame = com::array::enable_contactors_message(DEVICE, lcd_data.contactors);
-            send_can_frame::spawn(frame).unwrap();
-        });
-    }
-
-    #[task(priority = 1, binds = EXTI15_10, local = [input_buttons_15_10])]
+    #[task(priority = 2, binds = EXTI15_10, local = [input_buttons_15_10])]
     fn exti15_10_pending(cx: exti15_10_pending::Context) {
         let btn_horn = &mut cx.local.input_buttons_15_10.btn_horn;
         let btn_cruise = &mut cx.local.input_buttons_15_10.btn_cruise;
@@ -478,6 +473,15 @@ mod app {
         }
     }
 
+    #[task(priority = 2, shared = [lcd_data])]
+    fn toggle_contactors(mut cx: toggle_contactors::Context) {
+        cx.shared.lcd_data.lock(|lcd_data| {
+            lcd_data.contactors = !lcd_data.contactors;
+            let frame = com::array::enable_contactors_message(DEVICE, lcd_data.contactors);
+            send_can_frame::spawn(frame).unwrap();
+        });
+    }
+
     /// Handle left indictor button state change
     #[task(priority = 2, shared = [can, input_left_indicator])]
     fn button_indicator_left_handler(
@@ -491,8 +495,7 @@ mod app {
         );
 
         cx.shared.input_left_indicator.lock(|l_input| {
-            *l_input = !*l_input;
-            toggle_left_indicator::spawn().unwrap();
+            *l_input = state;
         });
 
         cx.shared.can.lock(|can| {
@@ -513,6 +516,7 @@ mod app {
     fn button_cruise_toggle_handler(mut cx: button_cruise_toggle_handler::Context) {
         cx.shared.lcd_data.lock(|lcd_data| {
             lcd_data.cruise = !lcd_data.cruise;
+            defmt::debug!("cruise is now {}", lcd_data.cruise);
             let frame = wavesculptor::control_type_message(DEVICE, lcd_data.cruise);
             send_can_frame::spawn(frame).unwrap();
         });
@@ -524,15 +528,14 @@ mod app {
             cx.shared.lcd_data.lock(|lcd_data| {
                 lcd_data.left_indicator = !lcd_data.left_indicator;
 
-                if *l_input {
-                    toggle_left_indicator::spawn_after(Duration::millis(500))
-                        .unwrap();
-                } else {
+                if !*l_input {
                     // Ensure display character is cleared
                     lcd_data.left_indicator = false;
                 }
             });
         });
+
+        toggle_left_indicator::spawn_after(Duration::millis(500)).unwrap();
     }
 
     /// Handle right indicator button state change
@@ -548,8 +551,7 @@ mod app {
         );
 
         cx.shared.input_right_indicator.lock(|r_input| {
-            *r_input = !*r_input;
-            toggle_right_indicator::spawn().unwrap();
+            *r_input = state;
         });
 
         cx.shared.can.lock(|can| {
@@ -563,15 +565,14 @@ mod app {
             cx.shared.lcd_data.lock(|lcd_data| {
                 lcd_data.right_indicator = !lcd_data.right_indicator;
 
-                if *r_input {
-                    toggle_right_indicator::spawn_after(Duration::millis(500))
-                        .unwrap();
-                } else {
+                if !*r_input {
                     // Ensure display character is cleared
                     lcd_data.right_indicator = false;
                 }
             });
         });
+
+        toggle_right_indicator::spawn_after(Duration::millis(500)).unwrap();
     }
 
     #[task(priority = 1, shared = [can])]
@@ -716,7 +717,7 @@ mod app {
         // defmt::trace!("task: can receive");
         let id = match frame.id() {
             Id::Standard(id) => {
-                defmt::debug!("STD FRAME: {:?} {:?}", id.as_raw(), frame);
+                // defmt::debug!("STD FRAME: {:?} {:?}", id.as_raw(), frame);
                 return;
             }
             Id::Extended(id) => id,
@@ -724,7 +725,7 @@ mod app {
 
         let id: j1939::ExtendedId = id.into();
 
-        defmt::debug!("EXT FRAME: {:?} {:?}", id.to_bits(), frame);
+        // defmt::debug!("EXT FRAME: {:?} {:?}", id.to_bits(), frame);
 
         cx.shared.lcd_data.lock(|lcd_data| {
             match id.pgn {
