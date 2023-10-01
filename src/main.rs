@@ -73,9 +73,9 @@ use stm32l4xx_hal::{
         PC2,  // PWM4
         PC3,  // PWM3
         PC6,  // DI1 INDICATOR LEFT
-        PC7,  // DI2 INDICATOR RIGHT
-        PC8,  // DI3
-        PC9,  // DI4
+        PC7,  // DI2 
+        PC8,  // DI3 INDICATOR RIGHT
+        PC9,  // DI4 CONTACTOR SWITCH
         PD2,  // DI12
     },
     prelude::*,
@@ -102,7 +102,7 @@ pub struct LcdData {
 
 pub struct InputButtons9_5 {
     btn_indicator_left: PC6<Input<PullDown>>,
-    btn_indicator_right: PC7<Input<PullDown>>, // TODO figure out which pins
+    btn_indicator_right: PC8<Input<PullDown>>, // TODO figure out which pins
 }
 
 pub struct InputButtons15_10 {
@@ -146,7 +146,7 @@ mod app {
         lcd_disp: LCD,
         adc: ADC,
         driver_pot: PA0<Analog>,
-        enable_contactor_switch: PC8<Input<PullUp>>,
+        enable_contactor_switch: PC9<Input<PullUp>>,
     }
 
     static MAXIMUM_DURATION: Duration = Duration::millis(2000);
@@ -204,7 +204,7 @@ mod app {
 
         let btn_indicator_right = {
             let mut btn = gpioc
-                .pc7
+                .pc8
                 .into_pull_down_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
             btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
@@ -252,7 +252,7 @@ mod app {
 
         let enable_contactor_switch = {
             let mut btn = gpioc
-                .pc8
+                .pc9
                 .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
             btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
@@ -265,6 +265,8 @@ mod app {
 
             btn
         };
+
+        // TODO button to send 0x30 data with 0x505 id
 
         let input_buttons_9_5 = InputButtons9_5 {
             btn_indicator_left,
@@ -618,8 +620,11 @@ mod app {
         let mut debouncer = Debouncer::new();
         let mut adc_val = cx.local.adc.read(cx.local.driver_pot).unwrap();
         adc_val = debouncer.update(adc_val, monotonics::MonoTimer::now().ticks(), 800);
-        
-        let new_mode = DriverModes::from((adc_val / 1000) as u8);
+
+        let new_mode = DriverModes::from((adc_val / 900) as u8);
+
+        defmt::debug!("adc: {} {}", adc_val, new_mode as u8);
+
         cx.shared.lcd_data.lock(|lcd_data| {
             if new_mode != lcd_data.mode {
                 button_driver_mode_handler::spawn(new_mode).unwrap();
