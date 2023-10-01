@@ -134,6 +134,7 @@ mod app {
         lcd_data: LcdData,
         input_left_indicator: bool,
         input_right_indicator: bool,
+        last_ind_sent: Instant,
     }
 
     #[local]
@@ -145,8 +146,10 @@ mod app {
         lcd_disp: LCD,
         adc: ADC,
         driver_pot: PA0<Analog>,
-        enable_contactor_switch: PC8<Input<PullUp>>
+        enable_contactor_switch: PC8<Input<PullUp>>,
     }
+
+    static MAXIMUM_DURATION: Duration = Duration::millis(2000);
 
     #[init]
     fn init(mut cx: init::Context) -> (Shared, Local, init::Monotonics) {
@@ -372,6 +375,8 @@ mod app {
         let driver_pot =
             gpioa.pa0.into_analog(&mut gpioa.moder, &mut gpioa.pupdr);
 
+        let last_ind_sent = Instant::from_ticks(0);
+
         run::spawn().unwrap();
         heartbeat::spawn_after(Duration::millis(500)).unwrap();
         update_display::spawn().unwrap();
@@ -385,6 +390,7 @@ mod app {
                 lcd_data,
                 input_left_indicator: input_buttons_9_5.btn_indicator_left.is_high(),
                 input_right_indicator: input_buttons_9_5.btn_indicator_right.is_high(),
+                last_ind_sent
             },
             Local {
                 watchdog,
@@ -402,11 +408,25 @@ mod app {
 
     // TODO each task needs rising or falling edge as parameter
 
-    #[task(priority = 1, local = [watchdog])]
-    fn run(cx: run::Context) {
+    #[task(priority = 1, shared = [last_ind_sent, input_left_indicator, input_right_indicator], local = [watchdog])]
+    fn run(mut cx: run::Context) {
         defmt::trace!("task: run");
 
         cx.local.watchdog.feed();
+
+        let time = monotonics::MonoTimer::now();
+
+        cx.shared.last_ind_sent.lock(|last| {
+            if time.checked_duration_since(*last).unwrap() > MAXIMUM_DURATION {
+                cx.shared.input_left_indicator.lock(|l_ind| {
+                    let _ =  button_indicator_left_handler::spawn(*l_ind);
+                });
+
+                cx.shared.input_right_indicator.lock(|r_ind| {
+                    let _ =  button_indicator_right_handler::spawn(*r_ind);
+                });
+            }
+        });
 
         run::spawn_after(Duration::millis(10)).unwrap();
     }
@@ -484,7 +504,7 @@ mod app {
     }
 
     /// Handle left indictor button state change
-    #[task(priority = 2, shared = [can, input_left_indicator])]
+    #[task(priority = 2, shared = [can, last_ind_sent, input_left_indicator])]
     fn button_indicator_left_handler(
         mut cx: button_indicator_left_handler::Context,
         state: bool,
@@ -502,6 +522,10 @@ mod app {
 
         cx.shared.can.lock(|can| {
             nb::block!(can.transmit(&light_frame)).unwrap();
+        });
+        
+        cx.shared.last_ind_sent.lock(|last| {
+            *last = monotonics::MonoTimer::now();
         });
     }
 
@@ -541,7 +565,7 @@ mod app {
     }
 
     /// Handle right indicator button state change
-    #[task(priority = 1, shared = [can, input_right_indicator])]
+    #[task(priority = 1, shared = [can, input_right_indicator, last_ind_sent])]
     fn button_indicator_right_handler(
         mut cx: button_indicator_right_handler::Context,
         state: bool,
@@ -559,6 +583,10 @@ mod app {
 
         cx.shared.can.lock(|can| {
             nb::block!(can.transmit(&light_frame)).unwrap();
+        });
+
+        cx.shared.last_ind_sent.lock(|last| {
+            *last = monotonics::MonoTimer::now();
         });
     }
 
