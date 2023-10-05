@@ -34,7 +34,7 @@ use solar_car::{
 
 use bxcan::{filter::Mask32, Frame, Id, Interrupts, StandardId};
 use numtoa::NumToA;
-use phln::wavesculptor::WaveSculptor;
+use phln::wavesculptor::{ErrorFlags, WaveSculptor};
 
 use stm32l4xx_hal::{
     adc::{DmaMode, SampleTime, Sequence, ADC},
@@ -97,7 +97,7 @@ pub struct LcdData {
     right_indicator: bool,
     mode: DriverModes, // Drive, Neutral, or Reverse
     cruise: bool, 
-    warnings: [u8; 6],
+    warnings: [u8; 8],
     contactors: bool, // Contactors enabled or not
 }
 
@@ -357,14 +357,14 @@ mod app {
         };
 
         let lcd_data = LcdData {
-            speed: 100f32,
-            battery: 12f32,
-            temperature: 65f32,
+            speed: 0f32,
+            battery: 0f32,
+            temperature: 0f32,
             left_indicator: false,
             right_indicator: false,
             mode: DriverModes::Neutral,
             cruise: false, // torque mode by default
-            warnings: [0, 0, 0, 0, 0, 0],
+            warnings: [0, 0, 0, 0, 0, 0, 0, 0],
             contactors: enable_contactor_switch.is_low(),
         };
 
@@ -647,7 +647,7 @@ mod app {
         cx.shared.lcd_data.lock(|lcd_data| {
             // Display look should as following
             // |L_100_100_100_R|
-            // |C E ABCDEFG   M|
+            // |C E ABCDEFGH  M|
             // Top row: <Left indicator> <battery> <speed> <temperature> <Right indicator>
             // Bot row: <Cruise enabled> <Contactors Engaged> <Warnings> <Driver mode>
             // Start by clearing everything
@@ -773,6 +773,10 @@ mod app {
                         if let Some(temp) = ws22.status().motor_temperature {
                             lcd_data.temperature = temp;
                         }
+
+                        if let Some(error_flags) = ws22.status().error_flags {
+                            process_warnings(error_flags, lcd_data);
+                        }
                     });
                 }
                 return;
@@ -782,6 +786,21 @@ mod app {
 
         let id: j1939::ExtendedId = id.into();
         // defmt::debug!("EXT FRAME: {:?} {:?}", id.to_bits(), frame);
+    }
+
+    fn process_warnings(error_flags: ErrorFlags, lcd_data: &mut LcdData) {
+        lcd_data.warnings[0] = (error_flags.contains(ErrorFlags::SOFTWARE_OVER_CURRENT)) as u8;
+        lcd_data.warnings[1] = (error_flags.contains(ErrorFlags::DC_BUS_OVER_CURRENT)) as u8;
+        lcd_data.warnings[2] = (error_flags.contains(ErrorFlags::BAD_MOTOR_POSITION_SEQUENCE)) as u8;
+        lcd_data.warnings[3] = (error_flags.contains(ErrorFlags::WATCHDOG_CAUSED_LAST_RESET)) as u8;
+        lcd_data.warnings[4] = (error_flags.contains(ErrorFlags::CONFIG_READ_ERROR)) as u8;
+        lcd_data.warnings[5] = (error_flags.contains(ErrorFlags::RAIL_15V_UVLO)) as u8;
+        lcd_data.warnings[6] = (error_flags.contains(ErrorFlags::DESATURATION_FAULT)) as u8;
+        lcd_data.warnings[7] = (error_flags.contains(ErrorFlags::MOTOR_OVER_SPEED)) as u8;
+
+        for i in 0..lcd_data.warnings.len() {
+            lcd_data.warnings[i] = (error_flags.contains(ErrorFlags::from_bits(1 << i).unwrap())) as u8;
+        }
     }
 }
 
