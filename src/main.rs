@@ -789,15 +789,6 @@ mod app {
     }
 
     fn process_warnings(error_flags: ErrorFlags, lcd_data: &mut LcdData) {
-        lcd_data.warnings[0] = (error_flags.contains(ErrorFlags::SOFTWARE_OVER_CURRENT)) as u8;
-        lcd_data.warnings[1] = (error_flags.contains(ErrorFlags::DC_BUS_OVER_CURRENT)) as u8;
-        lcd_data.warnings[2] = (error_flags.contains(ErrorFlags::BAD_MOTOR_POSITION_SEQUENCE)) as u8;
-        lcd_data.warnings[3] = (error_flags.contains(ErrorFlags::WATCHDOG_CAUSED_LAST_RESET)) as u8;
-        lcd_data.warnings[4] = (error_flags.contains(ErrorFlags::CONFIG_READ_ERROR)) as u8;
-        lcd_data.warnings[5] = (error_flags.contains(ErrorFlags::RAIL_15V_UVLO)) as u8;
-        lcd_data.warnings[6] = (error_flags.contains(ErrorFlags::DESATURATION_FAULT)) as u8;
-        lcd_data.warnings[7] = (error_flags.contains(ErrorFlags::MOTOR_OVER_SPEED)) as u8;
-
         for i in 0..lcd_data.warnings.len() {
             lcd_data.warnings[i] = (error_flags.contains(ErrorFlags::from_bits(1 << i).unwrap())) as u8;
         }
