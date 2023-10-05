@@ -34,6 +34,7 @@ use solar_car::{
 
 use bxcan::{filter::Mask32, Frame, Id, Interrupts, StandardId};
 use numtoa::NumToA;
+use phln::wavesculptor::WaveSculptor;
 
 use stm32l4xx_hal::{
     adc::{DmaMode, SampleTime, Sequence, ADC},
@@ -147,6 +148,7 @@ mod app {
         adc: ADC,
         driver_pot: PA0<Analog>,
         enable_contactor_switch: PC9<Input<PullUp>>,
+        ws22: WaveSculptor
     }
 
     static MAXIMUM_DURATION: Duration = Duration::millis(2000);
@@ -379,6 +381,8 @@ mod app {
 
         let last_ind_sent = Instant::from_ticks(0);
 
+        let ws22 = WaveSculptor::new(phln::wavesculptor::ID_BASE);
+
         run::spawn().unwrap();
         heartbeat::spawn_after(Duration::millis(500)).unwrap();
         update_display::spawn().unwrap();
@@ -402,7 +406,8 @@ mod app {
                 lcd_disp,
                 adc,
                 driver_pot,
-                enable_contactor_switch
+                enable_contactor_switch,
+                ws22
             },
             init::Monotonics(mono),
         )
@@ -748,65 +753,36 @@ mod app {
         })
     }
 
-    #[task(priority = 1, shared = [lcd_data], capacity=100)]
+    #[task(priority = 1, shared = [lcd_data], local = [ws22], capacity=100)]
     fn can_receive(mut cx: can_receive::Context, frame: Frame) {
         // defmt::trace!("task: can receive");
         let id = match frame.id() {
             Id::Standard(id) => {
-                // defmt::debug!("STD FRAME: {:?} {:?}", id.as_raw(), frame);
+                let ws22 = cx.local.ws22;
+                if id.as_raw() >= phln::wavesculptor::ID_BASE {
+                    let _res = ws22.receive(frame);
+                    cx.shared.lcd_data.lock(|lcd_data| {
+                        if let Some(voltage) = ws22.status().bus_voltage {
+                            lcd_data.battery = voltage;
+                        }
+
+                        if let Some(velocity) = ws22.status().vehicle_velocity {
+                            lcd_data.speed = velocity;
+                        }
+
+                        if let Some(temp) = ws22.status().motor_temperature {
+                            lcd_data.temperature = temp;
+                        }
+                    });
+                }
                 return;
             }
             Id::Extended(id) => id,
         };
 
         let id: j1939::ExtendedId = id.into();
-
         // defmt::debug!("EXT FRAME: {:?} {:?}", id.to_bits(), frame);
-
-        cx.shared.lcd_data.lock(|lcd_data| {
-            match id.pgn {
-                Pgn::Destination(pgn) => match pgn {
-                    wavesculptor::PGN_BATTERY_MESSAGE => {
-                        if let Some(data) = frame.data() {
-                            if let Ok(batt_data) = data[0..4].try_into() {
-                                lcd_data.battery =
-                                    f32::from_le_bytes(batt_data);
-                            }
-                        }
-                    },
-                    wavesculptor::PGN_SPEED_MESSAGE => {
-                        if let Some(data) = frame.data() {
-                            if let Ok(speed_data) = data[0..4].try_into() {
-                                lcd_data.speed =
-                                    f32::from_le_bytes(speed_data);
-                            }
-                        }
-                    },
-                    wavesculptor::PGN_TEMPERATURE_MESSAGE => {
-                        if let Some(data) = frame.data() {
-                            if let Ok(temp_data) = data[0..4].try_into() {
-                                lcd_data.temperature =
-                                    f32::from_le_bytes(temp_data);
-                            }
-                        }
-                    },
-                    _ => {
-                        defmt::debug!("whut happun")
-                    }
-                },
-                _ => {} // ignore broadcast messages
-            }
-        });
     }
-
-    // #[idle]
-    // fn idle(_: idle::Context) -> ! {
-    //     defmt::trace!("task: idle");
-
-    //     loop {
-    //         cortex_m::asm::nop();
-    //     }
-    // }
 }
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message

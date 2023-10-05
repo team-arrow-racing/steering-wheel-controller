@@ -332,6 +332,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d5439c4ad607c3c23abf66de8c8bf57ba8adcd1f129e699851a6e43935d339d"
 
 [[package]]
+name = "num-complex"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ba157ca0885411de85d6ca030ba7e2a83a28636056c7c699b07c8b6f7383214"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "num-traits"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f30b0abd723be7e2ffca1272140fac1a2f084c77ec3e123c192b66af1ee9e6c2"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "numtoa"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -366,6 +384,16 @@ checksum = "aa6fa5645ef5a760cd340eaa92af9c1ce131c8c09e7f8926d8a24b59d26652b9"
 dependencies = [
  "cortex-m",
  "defmt",
+]
+
+[[package]]
+name = "phln"
+version = "0.1.0"
+source = "git+https://github.com/team-arrow-racing/phln-rs#71b66e010f1a71db62c95d096d7a7dd1d6da318c"
+dependencies = [
+ "bitflags",
+ "bxcan",
+ "num-complex",
 ]
 
 [[package]]
@@ -531,6 +559,7 @@ dependencies = [
  "nb 1.1.0",
  "numtoa",
  "panic-probe",
+ "phln",
  "solar-car",
  "stm32l4xx-hal",
  "timed-debouncer",

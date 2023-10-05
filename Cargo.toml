@@ -22,6 +22,11 @@ version = "0.1.1"
 # git = "https://github.com/team-arrow-racing/solar-car-common"
 path = "../solar-car-common" # for local development
 
+[dependencies.phln]
+version = "0.1.0"
+git = "https://github.com/team-arrow-racing/phln-rs"
+# path = "../phln-rs" # for local development
+
 # [dependencies.arrow_display]
 # git = "https://github.com/team-arrow-racing/arrow_display"
 
