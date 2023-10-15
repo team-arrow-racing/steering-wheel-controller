@@ -102,8 +102,8 @@ pub struct LcdData {
 }
 
 pub struct InputButtons9_5 {
-    btn_indicator_left: PC6<Input<PullDown>>,
-    btn_indicator_right: PC8<Input<PullDown>>, // TODO figure out which pins
+    btn_indicator_left: PC6<Input<PullUp>>,
+    btn_indicator_right: PC8<Input<PullUp>>, // TODO figure out which pins
 }
 
 pub struct InputButtons15_10 {
@@ -191,7 +191,7 @@ mod app {
         let btn_indicator_left = {
             let mut btn = gpioc
                 .pc6
-                .into_pull_down_input(&mut gpioc.moder, &mut gpioc.pupdr);
+                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
             btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
             btn.enable_interrupt(&mut cx.device.EXTI);
@@ -207,7 +207,7 @@ mod app {
         let btn_indicator_right = {
             let mut btn = gpioc
                 .pc8
-                .into_pull_down_input(&mut gpioc.moder, &mut gpioc.pupdr);
+                .into_pull_up_input(&mut gpioc.moder, &mut gpioc.pupdr);
 
             btn.make_interrupt_source(&mut cx.device.SYSCFG, &mut rcc.apb2);
             btn.enable_interrupt(&mut cx.device.EXTI);
@@ -559,16 +559,12 @@ mod app {
     fn toggle_left_indicator(mut cx: toggle_left_indicator::Context) {
         cx.shared.input_left_indicator.lock(|l_input| {
             cx.shared.lcd_data.lock(|lcd_data| {
-                lcd_data.left_indicator = !lcd_data.left_indicator;
-
-                if !*l_input {
-                    // Ensure display character is cleared
-                    lcd_data.left_indicator = false;
-                }
+                lcd_data.left_indicator = *l_input;
+                // TODO handle actual light output
             });
         });
 
-        toggle_left_indicator::spawn_after(Duration::millis(500)).unwrap();
+        toggle_left_indicator::spawn_after(Duration::millis(100)).unwrap();
     }
 
     /// Handle right indicator button state change
@@ -601,16 +597,12 @@ mod app {
     fn toggle_right_indicator(mut cx: toggle_right_indicator::Context) {
         cx.shared.input_right_indicator.lock(|r_input| {
             cx.shared.lcd_data.lock(|lcd_data| {
-                lcd_data.right_indicator = !lcd_data.right_indicator;
-
-                if !*r_input {
-                    // Ensure display character is cleared
-                    lcd_data.right_indicator = false;
-                }
+                lcd_data.right_indicator = *r_input;
+                // TODO handle actual light output
             });
         });
 
-        toggle_right_indicator::spawn_after(Duration::millis(500)).unwrap();
+        toggle_right_indicator::spawn_after(Duration::millis(100)).unwrap();
     }
 
     #[task(priority = 1, shared = [can])]
@@ -628,7 +620,7 @@ mod app {
 
         let new_mode = DriverModes::from((adc_val / 900) as u8);
 
-        defmt::debug!("adc: {} {}", adc_val, new_mode as u8);
+        // defmt::debug!("adc: {} {}", adc_val, new_mode as u8);
 
         cx.shared.lcd_data.lock(|lcd_data| {
             if new_mode != lcd_data.mode {
