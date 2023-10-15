@@ -727,7 +727,7 @@ mod app {
                 DriverModes::Reverse => lcd_disp.send_string("R"),
             }
 
-            update_display::spawn_after(Duration::millis(100)).unwrap();
+            update_display::spawn_after(Duration::millis(1000)).unwrap();
         });
     }
 
