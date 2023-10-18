@@ -148,6 +148,8 @@ mod app {
         adc: ADC,
         driver_pot: PA0<Analog>,
         enable_contactor_switch: PC9<Input<PullUp>>,
+        left_ind_light: PC1<Output<PushPull>>,
+        right_ind_light: PC0<Output<PushPull>>,
         ws22: WaveSculptor
     }
 
@@ -379,6 +381,14 @@ mod app {
         let driver_pot =
             gpioa.pa0.into_analog(&mut gpioa.moder, &mut gpioa.pupdr);
 
+        let left_ind_light = gpioc
+            .pc1
+            .into_push_pull_output(&mut gpioc.moder, &mut gpioc.otyper);
+
+        let right_ind_light = gpioc
+            .pc0
+            .into_push_pull_output(&mut gpioc.moder, &mut gpioc.otyper);
+
         let last_ind_sent = Instant::from_ticks(0);
 
         let ws22 = WaveSculptor::new(phln::wavesculptor::ID_BASE);
@@ -407,6 +417,8 @@ mod app {
                 adc,
                 driver_pot,
                 enable_contactor_switch,
+                left_ind_light,
+                right_ind_light,
                 ws22
             },
             init::Monotonics(mono),
@@ -415,7 +427,7 @@ mod app {
 
     // TODO each task needs rising or falling edge as parameter
 
-    #[task(priority = 1, shared = [last_ind_sent, input_left_indicator, input_right_indicator], local = [watchdog])]
+    #[task(priority = 1, shared = [last_ind_sent, input_left_indicator, input_right_indicator], local = [watchdog, left_ind_light, right_ind_light])]
     fn run(mut cx: run::Context) {
         defmt::trace!("task: run");
 
@@ -435,6 +447,24 @@ mod app {
             }
         });
 
+        let l_light = cx.local.left_ind_light;
+        let r_light = cx.local.right_ind_light;
+        let on: bool = (time.duration_since_epoch().to_millis() % 1000) > 500;
+
+        cx.shared.input_left_indicator.lock(|l_ind| {
+            l_light.set_state(PinState::from(
+                *l_ind && on
+            ));
+            defmt::debug!("l light {}", l_light.is_set_high());
+        });
+
+        cx.shared.input_right_indicator.lock(|r_ind| {
+            r_light.set_state(PinState::from(
+                *r_ind && on
+            ));
+            defmt::debug!("r light {}", r_light.is_set_high());
+        });
+        
         run::spawn_after(Duration::millis(10)).unwrap();
     }
 
