@@ -1,5 +1,34 @@
 # Steering Wheel
 
+Respondible for handling driver input through dashboard interface, and outputing mission data on an LCD screen. Uses STM32L432KC.
+
+### Main functions
+* Takes driver input from buttons and switches on a dashboard
+* Displays mission data on a 16x2 character LCD screen
+
+The LCD screen layout is in the following format  
+|L_100_100_100_R|  
+|C__ABCDEFGH__M|  
+Top row: [Left indicator] [battery voltage] [speed] [motor temperature] [Right indicator]  
+Bot row: [Cruise enabled] [Warnings] [Drive mode]  
+
+The warnings are the ```ErrorFlags``` struct found in the [Prohelion WaveSculptor Library](https://github.com/team-arrow-racing/phln-rs/blob/main/src/wavesculptor.rs)
+ 
+### Important Pins
+PA0 - Drive mode select rotary switch (Drive/Neutral/Reverse)
+PA11 - CAN RX  
+PA12 - CAN TX
+PC11 - Cruise button   
+PC6 - Left indicator switch  
+PC8 - Right indicator switch
+PC1 - ADC IN (Data pin on a linear potentiometer connected to the cars accelerator pedal)  
+PC2 - LCD RS Pin  
+PC3 - LCD EN Pin  
+PA6 - LCD D4 Pin  
+PA7 - LCD D5 Pin  
+PA4 - LCD D6 Pin  
+PA5 - LCD D7 Pin  
+
 ## Requisites
 
 - Rust
