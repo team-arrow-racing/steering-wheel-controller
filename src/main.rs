@@ -455,14 +455,14 @@ mod app {
             l_light.set_state(PinState::from(
                 *l_ind && on
             ));
-            defmt::debug!("l light {}", l_light.is_set_high());
+            defmt::trace!("l light {}", l_light.is_set_high());
         });
 
         cx.shared.input_right_indicator.lock(|r_ind| {
             r_light.set_state(PinState::from(
                 *r_ind && on
             ));
-            defmt::debug!("r light {}", r_light.is_set_high());
+            defmt::trace!("r light {}", r_light.is_set_high());
         });
         
         run::spawn_after(Duration::millis(10)).unwrap();
@@ -650,7 +650,7 @@ mod app {
 
         let new_mode = DriverModes::from((adc_val / 900) as u8);
 
-        // defmt::debug!("adc: {} {}", adc_val, new_mode as u8);
+        defmt::debug!("adc: {} {}", adc_val, new_mode as u8);
 
         cx.shared.lcd_data.lock(|lcd_data| {
             if new_mode != lcd_data.mode {
@@ -789,7 +789,7 @@ mod app {
                         }
 
                         if let Some(velocity) = ws22.status().vehicle_velocity {
-                            lcd_data.speed = velocity;
+                            lcd_data.speed = velocity * 3.6;
                         }
 
                         if let Some(temp) = ws22.status().motor_temperature {
