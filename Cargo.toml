@@ -26,6 +26,9 @@ rtic-monotonics = { version = "1.4.1", features = [
 crc = "3.0"
 zerocopy = "0.6"
 byteorder = { version = "1.4", default-features = false }
+embedded-graphics = "0.8.0"
+ssd1306 = "0.8.4"
+heapless = "0.8.0"
 
 [[bin]]
 name = "steering-wheel-controller"

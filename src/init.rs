@@ -1,4 +1,4 @@
-use crate::app::{init, watchdog, Local, Shared};
+use crate::app::{init, watchdog, update_display, Local, Shared};
 use crate::hal::{
     gpio::Speed,
     independent_watchdog::IndependentWatchdog,
@@ -11,6 +11,7 @@ use fdcan::{
     config::{DataBitTiming, NominalBitTiming},
     interrupt::{InterruptLine, Interrupts},
 };
+use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 use rtic_monotonics::systick::*;
 
 pub fn init(cx: init::Context) -> (Shared, Local) {
@@ -93,7 +94,20 @@ pub fn init(cx: init::Context) -> (Shared, Local) {
         can.into_external_loopback()
     };
 
+    // LCD Display
+    // Configure the SCL and the SDA pin for our I2C bus
+    let scl = gpiob.pb8.into_alternate_open_drain();
+    let sda = gpiob.pb9.into_alternate_open_drain();
+
+    let i2c = cx.device.I2C1.i2c((scl, sda), 400.kHz(), ccdr.peripheral.I2C1, &ccdr.clocks);
+
+    let interface = I2CDisplayInterface::new(i2c);
+    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+        .into_buffered_graphics_mode();
+    display.init().unwrap();
+
     watchdog::spawn().ok();
+    update_display::spawn().ok();
 
     defmt::info!("Initialisation finished.");
 
@@ -106,6 +120,7 @@ pub fn init(cx: init::Context) -> (Shared, Local) {
             led_ok,
             led_warn,
             led_error,
+            display
         },
     )
 }
