@@ -28,6 +28,8 @@ use ssd1320::buffered_graphics::BufferedSsd1320z2;
 use rtic_monotonics::{systick::*, Monotonic};
 use ili9486::{Command, ILI9486};
 use display_interface_spi::SPIInterface;
+use ssd1320::Ssd1320z2;
+use ssd1322 as oled;
 
 pub fn init(cx: init::Context) -> (Shared, Local) {
     defmt::info!("init");
@@ -129,8 +131,9 @@ pub fn init(cx: init::Context) -> (Shared, Local) {
     let mosi = gpioc.pc12.into_alternate();
 
     let dc = gpiob.pb4.into_push_pull_output();
-    let res = gpiob.pb13.into_push_pull_output();
+    let mut res = gpiob.pb13.into_push_pull_output();
     let cs = gpiob.pb14.into_push_pull_output();
+    let cs2 = gpiob.pb15.into_push_pull_output();
 
     // Initialise the SPI peripheral.
     let spi = cx.device.SPI3.spi(
@@ -145,36 +148,64 @@ pub fn init(cx: init::Context) -> (Shared, Local) {
         .TIM2
         .timer(1.kHz(), ccdr.peripheral.TIM2, &ccdr.clocks);
     let mut delay = DelayFromCountDownTimer::new(timer);
-    let iface = SPIInterface::new(spi, dc, cs);
+    // let iface = SPIInterfaceNoCS::new(spi, dc);
 
-    // let mut lcd_driver = ILI9486::new(
-    //     &mut delay,
-    //     ili9486::color::PixelFormat::Rgb565,
-    //     iface,
-    //     ili9486::io::shim::OutputOnlyIoPin::new(res),
-    // )
-    // .unwrap();
+    // let mut display2 = BufferedSsd1320z2::new(iface, cs, cs2);
+    // display2.init(&mut res, &mut delay);
 
-    let mut lcd = Ili9341::new(
-        iface,
-        res,
-        &mut delay,
-        ili9341::Orientation::Portrait,
-        ili9341::DisplaySize320x480,
-    )
-    .unwrap();
-    let area = Rectangle::new(Point::new(100,100), Size::new(100, 200));
-    lcd.fill_solid(&area, Rgb565::RED).unwrap();
+    let mut disp = oled::Display::new(
+        oled::SpiInterface::new(spi, dc),
+        oled::PixelCoord(256, 64),
+        oled::PixelCoord(112, 0),
+    );
+
+    res.set_low();
+    delay.delay_ms(10_u16);
+    res.set_high();
+
+    disp.init(
+        oled::Config::new(
+            oled::ComScanDirection::RowZeroLast,
+            oled::ComLayout::DualProgressive,
+            oled::command::ColumnRemap::Forward,
+            oled::command::IncrementAxis::Horizontal,
+            oled::command::NibbleRemap::Forward
+        ).clock_fosc_divset(9, 1)
+            .display_enhancements(true, true)
+            .contrast_current(159)
+            .phase_lengths(5, 14)
+            .precharge_voltage(31)
+            .second_precharge_period(8)
+            .com_deselect_voltage(7),
+    ).unwrap();
+
+    defmt::info!("Display finished.");
+
+    let mut region = disp
+            .region(oled::PixelCoord(0, 0), oled::PixelCoord(256, 128))
+            .unwrap();
+        region.draw_packed(core::iter::repeat(0)).unwrap();
 
     // draw things
-    let text_style = MonoTextStyleBuilder::new()
-        .font(&FONT_10X20)
-        .text_color(Rgb565::BLUE)
-        .build();
+    // let text_style = MonoTextStyleBuilder::new()
+    //     .font(&FONT_10X20)
+    //     .text_color(Rgb565::BLUE)
+    //     .build();
 
-    Text::with_baseline("Hello World!", Point::new(50, 50), text_style, Baseline::Top)
-        .draw(&mut lcd)
-        .unwrap();
+    // let grey_text_style = MonoTextStyleBuilder::new()
+    //     .font(&FONT_10X20)
+    //     .text_color(GrayColor::BLACK)
+    //     .build();
+
+    // Text::with_baseline("Hello World!", Point::new(50, 50), grey_text_style, Baseline::Top)
+    //     .draw(&mut disp)
+    //     .unwrap();
+
+    defmt::info!("text finished.");
+
+    // display.flush().unwrap();
+
+    defmt::info!("display rendered.");
     
     watchdog::spawn().ok();
 

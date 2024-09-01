@@ -26,9 +26,10 @@ rtic-monotonics = { version = "1.4.1", features = [
 crc = "3.0"
 zerocopy = "0.6"
 byteorder = { version = "1.4", default-features = false }
-embedded-graphics = "0.8.0"
+embedded-graphics = "0.8.1"
 ssd1306 = "0.8.4"
 ssd1320 = {path="../ssd1320z2"}
+ssd1322 = {git="https://github.com/amcelroy/ssd1322"}
 ili9486-driver = {path = "../ili9486-driver"}
 ili9341 = {path = "../ili9341-rs"}
 heapless = "0.8.0"
