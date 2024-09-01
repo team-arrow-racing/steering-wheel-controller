@@ -59,7 +59,7 @@ mod app {
         pub led_ok: ErasedPin<Output>,
         pub led_warn: ErasedPin<Output>,
         pub led_error: ErasedPin<Output>,
-        pub display: OLEDDisplay
+        // pub display: OLEDDisplay
     }
 
     #[task(local = [watchdog])]
@@ -83,7 +83,7 @@ mod app {
         #[task(priority = 1)]
         async fn can_receive(mut cx: can_receive::Context, frame: RxFrameInfo, buffer: [u8; 8]);
     }
-
+    /*
     #[task(local = [display])]
     async fn update_display(cx: update_display::Context) {
         let mut num: u8 = 0;
@@ -119,6 +119,7 @@ mod app {
             Systick::delay(1000_u64.millis()).await;
         }
     }
+    */
 }
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message

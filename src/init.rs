@@ -1,18 +1,33 @@
-use crate::app::{init, watchdog, update_display, Local, Shared};
+use crate::app::{init, watchdog, Local, Shared};
 use crate::hal::{
+    delay::{Delay, DelayFromCountDownTimer},
     gpio::Speed,
     independent_watchdog::IndependentWatchdog,
     prelude::*,
     rcc::{self, rec::FdcanClkSel},
+    spi
 };
 
+use core::borrow::BorrowMut;
 use core::num::{NonZeroU16, NonZeroU8};
+use display_interface::DisplayError;
+use embedded_graphics::pixelcolor::{Gray4, Rgb565};
+use embedded_graphics::primitives::Rectangle;
+use embedded_graphics::{
+    mono_font::{ascii::FONT_10X20, MonoTextStyleBuilder},
+    prelude::*,
+    text::{Baseline, Text}
+};
 use fdcan::{
     config::{DataBitTiming, NominalBitTiming},
     interrupt::{InterruptLine, Interrupts},
 };
+use ili9341::Ili9341;
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
-use rtic_monotonics::systick::*;
+use ssd1320::buffered_graphics::BufferedSsd1320z2;
+use rtic_monotonics::{systick::*, Monotonic};
+use ili9486::{Command, ILI9486};
+use display_interface_spi::SPIInterface;
 
 pub fn init(cx: init::Context) -> (Shared, Local) {
     defmt::info!("init");
@@ -104,10 +119,64 @@ pub fn init(cx: init::Context) -> (Shared, Local) {
     let interface = I2CDisplayInterface::new(i2c);
     let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
-    display.init().unwrap();
+    // display.init().unwrap();
 
+    defmt::info!("Display finished.");
+
+    // Second LCD
+    let sck = gpioc.pc10.into_alternate();
+    let miso = gpioc.pc11.into_alternate();
+    let mosi = gpioc.pc12.into_alternate();
+
+    let dc = gpiob.pb4.into_push_pull_output();
+    let res = gpiob.pb13.into_push_pull_output();
+    let cs = gpiob.pb14.into_push_pull_output();
+
+    // Initialise the SPI peripheral.
+    let spi = cx.device.SPI3.spi(
+        (sck, miso, mosi),
+        spi::MODE_0,
+        8.MHz(),
+        ccdr.peripheral.SPI3,
+        &ccdr.clocks,
+    );
+
+    let timer = cx.device
+        .TIM2
+        .timer(1.kHz(), ccdr.peripheral.TIM2, &ccdr.clocks);
+    let mut delay = DelayFromCountDownTimer::new(timer);
+    let iface = SPIInterface::new(spi, dc, cs);
+
+    // let mut lcd_driver = ILI9486::new(
+    //     &mut delay,
+    //     ili9486::color::PixelFormat::Rgb565,
+    //     iface,
+    //     ili9486::io::shim::OutputOnlyIoPin::new(res),
+    // )
+    // .unwrap();
+
+    let mut lcd = Ili9341::new(
+        iface,
+        res,
+        &mut delay,
+        ili9341::Orientation::Portrait,
+        ili9341::DisplaySize320x480,
+    )
+    .unwrap();
+    let area = Rectangle::new(Point::new(100,100), Size::new(100, 200));
+    lcd.fill_solid(&area, Rgb565::RED).unwrap();
+
+    // draw things
+    let text_style = MonoTextStyleBuilder::new()
+        .font(&FONT_10X20)
+        .text_color(Rgb565::BLUE)
+        .build();
+
+    Text::with_baseline("Hello World!", Point::new(50, 50), text_style, Baseline::Top)
+        .draw(&mut lcd)
+        .unwrap();
+    
     watchdog::spawn().ok();
-    update_display::spawn().ok();
 
     defmt::info!("Initialisation finished.");
 
@@ -120,7 +189,7 @@ pub fn init(cx: init::Context) -> (Shared, Local) {
             led_ok,
             led_warn,
             led_error,
-            display
+            // display
         },
     )
 }
