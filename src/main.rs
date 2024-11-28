@@ -25,7 +25,6 @@ use hal::{
     prelude::*,
     stm32::{self, I2C1},
 };
-use ssd1306::{prelude::*, Ssd1306, mode::BufferedGraphicsMode};
 use embedded_graphics::{
     mono_font::{ascii::FONT_10X20, MonoTextStyleBuilder},
     pixelcolor::BinaryColor,
@@ -40,13 +39,17 @@ use rtic_monotonics::{
 
 use heapless::String;
 use core::fmt::write;
-
 #[rtic::app(device = stm32h7xx_hal::pac, dispatchers = [UART4, SPI1])]
 mod app {
+    use display_interface_parallel_gpio::{Generic16BitBus, PGpio16BitInterface};
+    use embedded_graphics::pixelcolor::Rgb666;
+    use embedded_hal::digital::v2::OutputPin;
+    use mipidsi::{models::{ILI9341Rgb666, ILI9486Rgb666}, Display};
+    use stm32h7xx_hal::{gpio::{Pin, PushPull}, pac::SPI3};
+
     use super::*;
 
     type FdCanMode = ExternalLoopbackMode; // NormalOperationMode;
-    type OLEDDisplay = Ssd1306<I2CInterface<I2c<I2C1>>, DisplaySize128x64, BufferedGraphicsMode<DisplaySize128x64>>;
 
     #[shared]
     pub struct Shared {
@@ -59,7 +62,8 @@ mod app {
         pub led_ok: ErasedPin<Output>,
         pub led_warn: ErasedPin<Output>,
         pub led_error: ErasedPin<Output>,
-        // pub display: OLEDDisplay
+        // pain
+        pub display: Display<PGpio16BitInterface<Generic16BitBus<Pin<'D', 15, Output>, Pin<'D', 14, Output>, Pin<'D', 13, Output>, Pin<'D', 12, Output>, Pin<'D', 11, Output>, Pin<'E', 2, Output>, Pin<'B', 2, Output>, Pin<'B', 6, Output>, Pin<'A', 15, Output>, Pin<'B', 8, Output>, Pin<'B', 9, Output>, Pin<'E', 7, Output>, Pin<'E', 10, Output>, Pin<'E', 12, Output>, Pin<'E', 14, Output>, Pin<'E', 15, Output>>, Pin<'B', 4, Output>, Pin<'B', 15, Output>>, ILI9486Rgb666, Pin<'C', 6, Output>>
     }
 
     #[task(local = [watchdog])]
@@ -83,7 +87,7 @@ mod app {
         #[task(priority = 1)]
         async fn can_receive(mut cx: can_receive::Context, frame: RxFrameInfo, buffer: [u8; 8]);
     }
-    /*
+
     #[task(local = [display])]
     async fn update_display(cx: update_display::Context) {
         let mut num: u8 = 0;
@@ -91,35 +95,32 @@ mod app {
         let display = cx.local.display;
 
         let text_style = MonoTextStyleBuilder::new()
-            .font(&FONT_10X20)
-            .text_color(BinaryColor::On)
-            .build();
+        .font(&FONT_10X20)
+        .text_color(Rgb666::RED)
+        .build();
 
-        Text::with_baseline("Hello World!", Point::zero(), text_style, Baseline::Top)
+        Text::with_baseline("Hello World!", Point::new(10, 100), text_style, Baseline::Top)
             .draw(display)
             .unwrap();
-        display.flush().unwrap();
 
         Systick::delay(1000_u64.millis()).await;
 
         loop {
-            output.clear();
+            defmt::info!("printing to display");
             write(&mut output, format_args!("Hello {}!", num)).unwrap();
 
-            display.clear_buffer();
-            Text::with_baseline(output.as_str(), Point::zero(), text_style, Baseline::Top)
+            display.set_pixels(10, 100, 250, 30, core::iter::repeat(Rgb666::WHITE).take(20*150)).unwrap();
+
+            Text::with_baseline(output.as_str(), Point::new(10, 100), text_style, Baseline::Top)
                 .draw(display)
                 .unwrap();
-            display.flush().unwrap();
 
             num = num + 1;
-
-            // TODO figure out why it crashes after 5 loops
-
+            output.clear();
+            
             Systick::delay(1000_u64.millis()).await;
         }
     }
-    */
 }
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
