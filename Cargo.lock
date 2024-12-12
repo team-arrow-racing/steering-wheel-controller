@@ -51,6 +51,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
+name = "bitvec"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bc2832c24239b0141d5674bb9174f9d68a8b5b3f2753311927c172ca46f7e9c"
+dependencies = [
+ "funty",
+ "radium",
+ "tap",
+ "wyz",
+]
+
+[[package]]
+name = "bxcan"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b13b4b2ea9ab2ba924063ebb86ad895cb79f4a79bf90f27949eb20c335b30f9"
+dependencies = [
+ "bitflags",
+ "defmt",
+ "nb 1.1.0",
+ "vcell",
+]
+
+[[package]]
 name = "byte-slice-cast"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -274,6 +298,19 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
 name = "fdcan"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5c0c327e4fb2d35445b850b4890bb5a1f14e78be0e1fd4ab3c5fa895819c465"
+dependencies = [
+ "bitflags",
+ "nb 1.1.0",
+ "paste",
+ "static_assertions",
+ "vcell",
+]
+
+[[package]]
+name = "fdcan"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "553fb8420a8ca433ed032a3f284deeb95c12e4d3d25cdc15196669a27b2ae34b"
@@ -303,6 +340,12 @@ checksum = "17186ad64927d5ac8f02c1e77ccefa08ccd9eaa314d5a4772278aa204a22f7e7"
 dependencies = [
  "gcd",
 ]
+
+[[package]]
+name = "funty"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "futures-core"
@@ -370,6 +413,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "j1939"
+version = "0.1.1"
+source = "git+https://github.com/team-arrow-racing/sae-j1939-rs#2bde0d0e63c55e79918fa39a9cec64a749bc3f82"
+dependencies = [
+ "bxcan",
+]
+
+[[package]]
 name = "micromath"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -397,6 +448,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f30b0abd723be7e2ffca1272140fac1a2f084c77ec3e123c192b66af1ee9e6c2"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "packed_struct"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36b29691432cc9eff8b282278473b63df73bea49bc3ec5e67f31a3ae9c3ec190"
+dependencies = [
+ "bitvec",
+ "packed_struct_codegen",
+]
+
+[[package]]
+name = "packed_struct_codegen"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cd6706dfe50d53e0f6aa09e12c034c44faacd23e966ae5a209e8bdb8f179f98"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -468,6 +540,12 @@ checksum = "0fa76aaf39101c457836aec0ce2316dbdc3ab723cdda1c6bd4e6ad4208acaca7"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "radium"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "rtic"
@@ -561,6 +639,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
+name = "solar-car"
+version = "0.1.1"
+source = "git+https://github.com/team-arrow-racing/solar-car-common.git?rev=0bcf683#0bcf68331243dc5c6419f371d362f46958550b7a"
+dependencies = [
+ "bitflags",
+ "bxcan",
+ "defmt",
+ "fdcan 0.1.2",
+ "j1939",
+ "packed_struct",
+]
+
+[[package]]
 name = "ssd1306"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -597,11 +688,12 @@ dependencies = [
  "defmt-rtt",
  "embedded-graphics",
  "embedded-hal 0.2.7",
- "fdcan",
+ "fdcan 0.2.0",
  "heapless",
  "panic-probe",
  "rtic",
  "rtic-monotonics",
+ "solar-car",
  "ssd1306",
  "stm32h7xx-hal",
  "zerocopy",
@@ -634,7 +726,7 @@ dependencies = [
  "embedded-dma",
  "embedded-hal 0.2.7",
  "embedded-storage",
- "fdcan",
+ "fdcan 0.2.0",
  "fugit",
  "nb 1.1.0",
  "paste",
@@ -663,6 +755,12 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "tap"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "thiserror"
@@ -715,6 +813,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ee8f19f9d74293faf70901bc20ad067dc1ad390d2cbf1e3f75f721ffee908b6"
 dependencies = [
  "vcell",
+]
+
+[[package]]
+name = "wyz"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
+dependencies = [
+ "tap",
 ]
 
 [[package]]

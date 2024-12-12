@@ -41,8 +41,14 @@ use rtic_monotonics::{
 use heapless::String;
 use core::fmt::write;
 
+//CAN dependencies
+use solar_car::com::{lighting::{lighting_header, LampsState}, horn::horn_header};
+use solar_car::device::Device;
+
 #[rtic::app(device = stm32h7xx_hal::pac, dispatchers = [UART4, SPI1])]
 mod app {
+    use stm32h7xx_hal::gpio::{ExtiPin, Input, Pin};
+
     use super::*;
 
     type FdCanMode = ExternalLoopbackMode; // NormalOperationMode;
@@ -59,7 +65,8 @@ mod app {
         pub led_ok: ErasedPin<Output>,
         pub led_warn: ErasedPin<Output>,
         pub led_error: ErasedPin<Output>,
-        pub display: OLEDDisplay
+        pub display: OLEDDisplay,
+        pub buttons: InputButtons,
     }
 
     #[task(local = [watchdog])]
@@ -119,6 +126,47 @@ mod app {
             Systick::delay(1000_u64.millis()).await;
         }
     }
+
+//triggers on driver input
+#[task(binds = EXTI15_10, priority = 2, local = [buttons])]
+fn button_pressed(cx: button_pressed::Context) {
+    defmt::info!("Button Pressed!");
+    let btn_indicator_left = &mut cx.local.buttons.btn_indicator_left;
+    let btn_indicator_right = &mut cx.local.buttons.btn_indicator_right;
+    let btn_pre_chr = &mut cx.local.buttons.btn_pre_chr;
+    let btn_cruise = &mut cx.local.buttons.btn_cruise;
+    let btn_horn = &mut cx.local.buttons.btn_horn;
+
+    if btn_indicator_left.check_interrupt() {
+        defmt::info!("Left Indicator Received!");
+        btn_indicator_left.clear_interrupt_pending_bit();
+        //SPAWN HANDLER
+    }
+
+    if btn_indicator_right.check_interrupt() {
+        defmt::info!("Right Indicator Received!");
+        btn_indicator_right.clear_interrupt_pending_bit();
+        //SPAWN HANDLER
+    }
+    if btn_pre_chr.check_interrupt() {
+        defmt::info!("Precharge Received!");
+        btn_pre_chr.clear_interrupt_pending_bit();
+        //SPAWN HANDLER
+    }
+    if btn_cruise.check_interrupt() {
+        defmt::info!("Cruise Received!");
+        btn_cruise.clear_interrupt_pending_bit();
+        //SPAWN HANDLER
+    }
+    if btn_horn.check_interrupt() {
+        defmt::info!("Horn Received!");
+        btn_horn.clear_interrupt_pending_bit();
+        //SPAWN HANDLER
+    }
+    
+}
+
+
 }
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message

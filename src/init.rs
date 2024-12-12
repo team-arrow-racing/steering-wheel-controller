@@ -13,8 +13,17 @@ use fdcan::{
 };
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 use rtic_monotonics::systick::*;
+use stm32h7xx_hal::gpio::{Edge, ErasedPin, ExtiPin, Input};
 
-pub fn init(cx: init::Context) -> (Shared, Local) {
+pub struct InputButtons{
+    pub btn_indicator_left: ErasedPin<Input>,
+    pub btn_indicator_right: ErasedPin<Input>,
+    pub btn_pre_chr: ErasedPin<Input>,
+    pub btn_cruise: ErasedPin<Input>,
+    pub btn_horn: ErasedPin<Input>
+}
+
+pub fn init(mut cx: init::Context) -> (Shared, Local) {
     defmt::info!("init");
 
     // Setup and start independent watchdog.
@@ -55,6 +64,7 @@ pub fn init(cx: init::Context) -> (Shared, Local) {
     let gpiob = cx.device.GPIOB.split(ccdr.peripheral.GPIOB);
     let gpioc = cx.device.GPIOC.split(ccdr.peripheral.GPIOC);
     let gpiod = cx.device.GPIOD.split(ccdr.peripheral.GPIOD);
+    let gpioe = cx.device.GPIOE.split(ccdr.peripheral.GPIOE);
 
     // Status LEDs
     let led_ok = gpiob.pb10.into_push_pull_output().erase();
@@ -94,6 +104,89 @@ pub fn init(cx: init::Context) -> (Shared, Local) {
         can.into_external_loopback()
     };
 
+    //Buttons and EXTI interrupts
+
+    let mut exti = cx.device.EXTI;
+
+    let btn_indicator_left: ErasedPin<Input> = {
+        
+        let mut btn = gpioe
+        .pe11
+        .into_pull_up_input()
+        .erase();
+
+        btn.make_interrupt_source(&mut cx.device.SYSCFG);
+        btn.trigger_on_edge(&mut exti, Edge::Falling);
+        btn.enable_interrupt(&mut exti);
+
+        btn
+    };
+
+    let btn_indicator_right: ErasedPin<Input> = {
+        
+        let mut btn = gpioe
+        .pe12
+        .into_pull_up_input()
+        .erase();
+
+        btn.make_interrupt_source(&mut cx.device.SYSCFG);
+        btn.trigger_on_edge(&mut exti, Edge::Falling);
+        btn.enable_interrupt(&mut exti);
+
+        btn
+    };
+
+    let btn_pre_chr: ErasedPin<Input> = {
+        
+        let mut btn = gpioe
+        .pe13
+        .into_pull_up_input()
+        .erase();
+
+        btn.make_interrupt_source(&mut cx.device.SYSCFG);
+        btn.trigger_on_edge(&mut exti, Edge::Falling);
+        btn.enable_interrupt(&mut exti);
+
+        btn
+    };
+
+    let btn_cruise: ErasedPin<Input> = {
+        
+        let mut btn = gpioe
+        .pe14
+        .into_pull_up_input()
+        .erase();
+
+        btn.make_interrupt_source(&mut cx.device.SYSCFG);
+        btn.trigger_on_edge(&mut exti, Edge::Falling);
+        btn.enable_interrupt(&mut exti);
+
+        btn
+    };
+
+    let btn_horn: ErasedPin<Input> = {
+        
+        let mut btn = gpioe
+        .pe15
+        .into_pull_up_input()
+        .erase();
+
+        btn.make_interrupt_source(&mut cx.device.SYSCFG);
+        btn.trigger_on_edge(&mut exti, Edge::Falling);
+        btn.enable_interrupt(&mut exti);
+
+        btn
+    };
+
+    let buttons = InputButtons {
+        btn_indicator_left, 
+        btn_indicator_right, 
+        btn_pre_chr, 
+        btn_cruise, 
+        btn_horn
+    };
+
+
     // LCD Display
     // Configure the SCL and the SDA pin for our I2C bus
     let scl = gpiob.pb8.into_alternate_open_drain();
@@ -120,7 +213,8 @@ pub fn init(cx: init::Context) -> (Shared, Local) {
             led_ok,
             led_warn,
             led_error,
-            display
-        },
+            display,
+            buttons,
+        }
     )
 }

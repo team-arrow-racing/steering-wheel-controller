@@ -35,3 +35,9 @@ name = "steering-wheel-controller"
 test = false
 bench = false
 harness = false
+
+[dependencies.solar-car]
+version = "0.1.1"
+git = "https://github.com/team-arrow-racing/solar-car-common.git"
+#branch = "changes-for-fvc"
+rev = "0bcf683"
